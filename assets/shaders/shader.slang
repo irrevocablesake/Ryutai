@@ -26,11 +26,16 @@ VSOutput main( VSInput input ) {
     return output;
 }
 
-Sampler2D texture;
+Sampler2D velocityFieldA;
+Sampler2D velocityFieldB;
 
 [shader("fragment")]
 float4 main() : SV_Target {
     // float3 color = float3( 1.0, 0.0, 0.0 );
-    float3 color = texture.Sample(float2(0.0, 0.0)).rgb;
+    float3 colorA = velocityFieldA.Sample(float2(0.0, 0.0)).rgb;
+    float3 colorB = velocityFieldB.Sample(float2(0.0, 0.0)).rgb;
+
+    float3 color = lerp( colorA, colorB, 0.5 );
+
     return float4( color, 1.0);
 }

@@ -335,7 +335,19 @@ class Renderer {
 
 		}
 
-		void loadTextures() {
+		struct FieldState {
+			VkImage image;
+			VkImageView imageView;
+			VmaAllocation allocation;
+			VkSampler sampler;
+			VkDescriptorImageInfo descriptor;
+
+			VkClearColorValue clearColor;
+		};
+
+		FieldState generateField( VkClearColorValue clearValue ) {
+
+			FieldState fieldState;
 
 			VkImageCreateInfo textureImageCreateInfo{
 				.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
@@ -357,11 +369,11 @@ class Renderer {
 			VmaAllocationCreateInfo textureImageAllocationCreateInfo{
 				.usage = VMA_MEMORY_USAGE_AUTO
 			};
-			validateResult(vmaCreateImage( vmaAllocator, &textureImageCreateInfo, &textureImageAllocationCreateInfo, &image, &vmaAllocation, nullptr  ));
-		
+			validateResult(vmaCreateImage(vmaAllocator, &textureImageCreateInfo, &textureImageAllocationCreateInfo, &fieldState.image, &fieldState.allocation, nullptr));
+
 			VkImageViewCreateInfo textureImageViewCreateInfo{
 				.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-				.image = image,
+				.image = fieldState.image,
 				.viewType = VK_IMAGE_VIEW_TYPE_2D,
 				.format = textureImageCreateInfo.format,
 				.subresourceRange = {
@@ -371,13 +383,13 @@ class Renderer {
 				}
 			};
 
-			validateResult(vkCreateImageView( deviceIF.logical.device, &textureImageViewCreateInfo, nullptr, &imageView ));
-		
+			validateResult(vkCreateImageView(deviceIF.logical.device, &textureImageViewCreateInfo, nullptr, &fieldState.imageView));
+
 			VkFenceCreateInfo fenceOneTimeCreateInfo{
 				.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO
 			};
 			VkFence fenceOneTime;
-			validateResult( vkCreateFence( deviceIF.logical.device, &fenceOneTimeCreateInfo, nullptr, &fenceOneTime  ) );
+			validateResult(vkCreateFence(deviceIF.logical.device, &fenceOneTimeCreateInfo, nullptr, &fenceOneTime));
 
 			VkCommandBuffer commandBufferOneTime;
 			VkCommandBufferAllocateInfo commandBufferOneTimeAllocationInfo{
@@ -386,13 +398,13 @@ class Renderer {
 				.commandBufferCount = 1
 			};
 
-			validateResult( vkAllocateCommandBuffers( deviceIF.logical.device, &commandBufferOneTimeAllocationInfo, &commandBufferOneTime  ) );
+			validateResult(vkAllocateCommandBuffers(deviceIF.logical.device, &commandBufferOneTimeAllocationInfo, &commandBufferOneTime));
 
 			VkCommandBufferBeginInfo commandBufferOneTimeBeginInfo{
 				.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
 				.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
 			};
-			validateResult( vkBeginCommandBuffer( commandBufferOneTime, &commandBufferOneTimeBeginInfo ) );
+			validateResult(vkBeginCommandBuffer(commandBufferOneTime, &commandBufferOneTimeBeginInfo));
 
 			VkImageMemoryBarrier2 barrierLayoutTransition{
 				.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
@@ -402,7 +414,7 @@ class Renderer {
 				.dstAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
 				.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
 				.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-				.image = image,
+				.image = fieldState.image,
 				.subresourceRange = {
 					.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
 					.levelCount = 1,
@@ -418,13 +430,12 @@ class Renderer {
 
 			vkCmdPipelineBarrier2(commandBufferOneTime, &barrierDependencyInfo);
 
-			VkClearColorValue clearValue = { 0.0f, 1.0f, 0.0f, 1.0f };
 			VkImageSubresourceRange range{
 				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
 				.levelCount = 1,
 				.layerCount = 1
 			};
-			vkCmdClearColorImage( commandBufferOneTime, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearValue, 1, &range );
+			vkCmdClearColorImage(commandBufferOneTime, fieldState.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearValue, 1, &range);
 
 			VkImageMemoryBarrier2 barrierLayoutTransition1{
 				.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
@@ -434,7 +445,7 @@ class Renderer {
 				.dstAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
 				.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 				.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-				.image = image,
+				.image = fieldState.image,
 				.subresourceRange = {
 					.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
 					.levelCount = 1,
@@ -458,7 +469,7 @@ class Renderer {
 				.pCommandBuffers = &commandBufferOneTime
 			};
 
-			validateResult( vkQueueSubmit( deviceIF.queue.queue, 1, &oneTimeSubmitInfo, fenceOneTime ));
+			validateResult(vkQueueSubmit(deviceIF.queue.queue, 1, &oneTimeSubmitInfo, fenceOneTime));
 			validateResult(vkWaitForFences(deviceIF.logical.device, 1, &fenceOneTime, VK_TRUE, UINT64_MAX));
 
 			VkSamplerCreateInfo samplerCreateInfo{
@@ -470,17 +481,31 @@ class Renderer {
 				.maxLod = 1
 			};
 
-			validateResult(vkCreateSampler( deviceIF.logical.device, &samplerCreateInfo, nullptr, &sampler  ));
+			validateResult(vkCreateSampler(deviceIF.logical.device, &samplerCreateInfo, nullptr, &fieldState.sampler));
 
-			VkDescriptorImageInfo textureDescriptor{
-				.sampler = sampler,
-				.imageView = imageView,
+			fieldState.descriptor = {
+				.sampler = fieldState.sampler,
+				.imageView = fieldState.imageView,
 				.imageLayout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL
 			};
 
+			return fieldState;
+		}
+
+		void generateFields() {
+			FieldState vectorFieldA = generateField(VkClearColorValue{ 1.0, 0.0, 0.0 });
+			FieldState vectorFieldB = generateField(VkClearColorValue{ 0.0, 1.0, 0.0 });
+
+			fields.push_back(vectorFieldA);
+			fields.push_back(vectorFieldB);
+
+			uploadFields();
+		}
+
+		void uploadFields() {
 			VkDescriptorPoolSize poolSize{
 				.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-				.descriptorCount = 1
+				.descriptorCount = static_cast<uint32_t>(fields.size())
 			};
 
 			VkDescriptorPoolCreateInfo descriptorPoolCreateInfo{
@@ -491,17 +516,23 @@ class Renderer {
 			};
 
 			validateResult( vkCreateDescriptorPool( deviceIF.logical.device, &descriptorPoolCreateInfo, nullptr, &descriptorPool  ));
-		
-			VkDescriptorSetLayoutBinding descriptorLayoutBinding{
-				.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-				.descriptorCount = 1,
-				.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT
-			};
+	
+			std::vector<VkDescriptorSetLayoutBinding> bindings;
+			for (uint32_t index = 0; index < fields.size(); index++ ) {
+				VkDescriptorSetLayoutBinding binding{
+					.binding = index,
+					.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+					.descriptorCount = 1,
+					.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT
+				};
+
+				bindings.push_back(binding);
+			}
 
 			VkDescriptorSetLayoutCreateInfo descriptorLayoutCreateInfo{
 				.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-				.bindingCount = 1,
-				.pBindings = &descriptorLayoutBinding
+				.bindingCount = static_cast< uint32_t >( bindings.size() ),
+				.pBindings = bindings.data()
 			};
 
 			validateResult( vkCreateDescriptorSetLayout( deviceIF.logical.device, &descriptorLayoutCreateInfo, nullptr, &descriptorSetLayout  ) );
@@ -515,13 +546,18 @@ class Renderer {
 
 			validateResult( vkAllocateDescriptorSets( deviceIF.logical.device, &descriptorAllocateInfo, &descriptorSet  ) );
 		
+			std::vector<VkDescriptorImageInfo> descriptorList;
+			for (FieldState& field : fields) {
+				descriptorList.push_back(field.descriptor);
+			}
+
 			VkWriteDescriptorSet writeDesriptorSet{
 				.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
 				.dstSet = descriptorSet,
 				.dstBinding = 0,
-				.descriptorCount = 1,
+				.descriptorCount = static_cast<uint32_t>(fields.size()),
 				.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-				.pImageInfo = &textureDescriptor
+				.pImageInfo = descriptorList.data()
 			};
 
 			vkUpdateDescriptorSets(deviceIF.logical.device, 1, &writeDesriptorSet, 0, nullptr);
@@ -827,7 +863,7 @@ class Renderer {
 			setupSync2();
 			setupCommandBuffers();
 			loadAndCompileShaders();
-			loadTextures();
+			generateFields();
 			setupPipeline();
 			animate();
 		}
@@ -909,11 +945,6 @@ class Renderer {
 		Slang::ComPtr< slang::IGlobalSession > slangGlobalSession;
 		VkShaderModule shaderModule{};
 
-		VmaAllocation vmaAllocation;
-		VkImage image;
-		VkImageView imageView;
-		VkSampler sampler;
-
 		VkDescriptorPool descriptorPool;
 		VkDescriptorSetLayout descriptorSetLayout;
 		VkDescriptorSet descriptorSet;
@@ -923,6 +954,8 @@ class Renderer {
 
 		int frameIndex = 0;
 		uint32_t imageIndex = 0;
+
+		std::vector<FieldState> fields;
 };
 
 class Ryutai {
