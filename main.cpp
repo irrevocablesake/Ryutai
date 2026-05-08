@@ -210,7 +210,7 @@ class Renderer {
 					.height = windowIF.surfaceCapabilities.currentExtent.height
 				},
 				.imageArrayLayers = 1,
-				.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+				.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
 				.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
 				.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
 				.presentMode = VK_PRESENT_MODE_FIFO_KHR
@@ -345,46 +345,7 @@ class Renderer {
 			VkClearColorValue clearColor;
 		};
 
-		FieldState generateField( VkClearColorValue clearValue ) {
-
-			FieldState fieldState;
-
-			VkImageCreateInfo textureImageCreateInfo{
-				.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-				.imageType = VK_IMAGE_TYPE_2D,
-				.format = deviceIF.logical.swapchainConfiguration.imageFormat,
-				.extent{
-					.width = windowIF.surfaceCapabilities.currentExtent.width,
-					.height = windowIF.surfaceCapabilities.currentExtent.height,
-					.depth = 1
-				},
-				.mipLevels = 1,
-				.arrayLayers = 1,
-				.samples = VK_SAMPLE_COUNT_1_BIT,
-				.tiling = VK_IMAGE_TILING_OPTIMAL,
-				.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-				.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
-			};
-
-			VmaAllocationCreateInfo textureImageAllocationCreateInfo{
-				.usage = VMA_MEMORY_USAGE_AUTO
-			};
-			validateResult(vmaCreateImage(vmaAllocator, &textureImageCreateInfo, &textureImageAllocationCreateInfo, &fieldState.image, &fieldState.allocation, nullptr));
-
-			VkImageViewCreateInfo textureImageViewCreateInfo{
-				.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-				.image = fieldState.image,
-				.viewType = VK_IMAGE_VIEW_TYPE_2D,
-				.format = textureImageCreateInfo.format,
-				.subresourceRange = {
-					.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-					.levelCount = 1,
-					.layerCount = 1
-				}
-			};
-
-			validateResult(vkCreateImageView(deviceIF.logical.device, &textureImageViewCreateInfo, nullptr, &fieldState.imageView));
-
+		void clearImage( FieldState &fieldState, VkClearColorValue &clearValue ) {
 			VkFenceCreateInfo fenceOneTimeCreateInfo{
 				.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO
 			};
@@ -410,8 +371,8 @@ class Renderer {
 				.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
 				.srcStageMask = VK_PIPELINE_STAGE_2_NONE,
 				.srcAccessMask = VK_ACCESS_2_NONE,
-				.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-				.dstAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+				.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+				.dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
 				.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
 				.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 				.image = fieldState.image,
@@ -439,10 +400,10 @@ class Renderer {
 
 			VkImageMemoryBarrier2 barrierLayoutTransition1{
 				.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-				.srcStageMask = VK_PIPELINE_STAGE_2_NONE,
-				.srcAccessMask = VK_ACCESS_2_NONE,
+				.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+				.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
 				.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-				.dstAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+				.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
 				.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 				.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
 				.image = fieldState.image,
@@ -471,6 +432,49 @@ class Renderer {
 
 			validateResult(vkQueueSubmit(deviceIF.queue.queue, 1, &oneTimeSubmitInfo, fenceOneTime));
 			validateResult(vkWaitForFences(deviceIF.logical.device, 1, &fenceOneTime, VK_TRUE, UINT64_MAX));
+		}
+
+		FieldState generateField( VkClearColorValue clearValue ) {
+
+			FieldState fieldState;
+
+			VkImageCreateInfo textureImageCreateInfo{
+				.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+				.imageType = VK_IMAGE_TYPE_2D,
+				.format = deviceIF.logical.swapchainConfiguration.imageFormat,
+				.extent{
+					.width = windowIF.surfaceCapabilities.currentExtent.width,
+					.height = windowIF.surfaceCapabilities.currentExtent.height,
+					.depth = 1
+				},
+				.mipLevels = 1,
+				.arrayLayers = 1,
+				.samples = VK_SAMPLE_COUNT_1_BIT,
+				.tiling = VK_IMAGE_TILING_OPTIMAL,
+				.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+				.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
+			};
+
+			VmaAllocationCreateInfo textureImageAllocationCreateInfo{
+				.usage = VMA_MEMORY_USAGE_AUTO
+			};
+			validateResult(vmaCreateImage(vmaAllocator, &textureImageCreateInfo, &textureImageAllocationCreateInfo, &fieldState.image, &fieldState.allocation, nullptr));
+
+			VkImageViewCreateInfo textureImageViewCreateInfo{
+				.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+				.image = fieldState.image,
+				.viewType = VK_IMAGE_VIEW_TYPE_2D,
+				.format = textureImageCreateInfo.format,
+				.subresourceRange = {
+					.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+					.levelCount = 1,
+					.layerCount = 1
+				}
+			};
+
+			validateResult(vkCreateImageView(deviceIF.logical.device, &textureImageViewCreateInfo, nullptr, &fieldState.imageView));
+
+			clearImage( fieldState, clearValue );
 
 			VkSamplerCreateInfo samplerCreateInfo{
 				.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
@@ -486,7 +490,7 @@ class Renderer {
 			fieldState.descriptor = {
 				.sampler = fieldState.sampler,
 				.imageView = fieldState.imageView,
-				.imageLayout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL
+				.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
 			};
 
 			return fieldState;
@@ -503,64 +507,60 @@ class Renderer {
 		}
 
 		void uploadFields() {
+
+			descriptorSets.resize(fields.size());
+
 			VkDescriptorPoolSize poolSize{
 				.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-				.descriptorCount = static_cast<uint32_t>(fields.size())
+				.descriptorCount = static_cast< uint32_t>( fields.size())
 			};
 
 			VkDescriptorPoolCreateInfo descriptorPoolCreateInfo{
 				.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-				.maxSets = 1,
+				.maxSets = static_cast<uint32_t>(fields.size()),
 				.poolSizeCount = 1,
 				.pPoolSizes = &poolSize
 			};
 
 			validateResult( vkCreateDescriptorPool( deviceIF.logical.device, &descriptorPoolCreateInfo, nullptr, &descriptorPool  ));
 	
-			std::vector<VkDescriptorSetLayoutBinding> bindings;
-			for (uint32_t index = 0; index < fields.size(); index++ ) {
-				VkDescriptorSetLayoutBinding binding{
-					.binding = index,
-					.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-					.descriptorCount = 1,
-					.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT
-				};
-
-				bindings.push_back(binding);
-			}
-
+			VkDescriptorSetLayoutBinding binding{
+				.binding = 0,
+				.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+				.descriptorCount = 1,
+				.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT
+			};
+			
 			VkDescriptorSetLayoutCreateInfo descriptorLayoutCreateInfo{
 				.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-				.bindingCount = static_cast< uint32_t >( bindings.size() ),
-				.pBindings = bindings.data()
+				.bindingCount = 1,
+				.pBindings = &binding
 			};
 
-			validateResult( vkCreateDescriptorSetLayout( deviceIF.logical.device, &descriptorLayoutCreateInfo, nullptr, &descriptorSetLayout  ) );
+			validateResult( vkCreateDescriptorSetLayout( deviceIF.logical.device, &descriptorLayoutCreateInfo, nullptr, &descriptorSetLayout ) );
 		
+			descriptorSetLayouts = std::vector<VkDescriptorSetLayout>(fields.size(), descriptorSetLayout);
 			VkDescriptorSetAllocateInfo descriptorAllocateInfo{
 				.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
 				.descriptorPool = descriptorPool,
-				.descriptorSetCount = 1,
-				.pSetLayouts = &descriptorSetLayout
+				.descriptorSetCount = static_cast< uint32_t>(fields.size()),
+				.pSetLayouts = descriptorSetLayouts.data()
 			};
 
-			validateResult( vkAllocateDescriptorSets( deviceIF.logical.device, &descriptorAllocateInfo, &descriptorSet  ) );
+			validateResult( vkAllocateDescriptorSets( deviceIF.logical.device, &descriptorAllocateInfo, descriptorSets.data()));
 		
-			std::vector<VkDescriptorImageInfo> descriptorList;
-			for (FieldState& field : fields) {
-				descriptorList.push_back(field.descriptor);
+			for (uint32_t index = 0; index < fields.size(); index++) {
+				VkWriteDescriptorSet writeDesriptorSet{
+					.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+					.dstSet = descriptorSets[ index ],
+					.dstBinding = 0,
+					.descriptorCount = 1,
+					.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+					.pImageInfo = &fields[index].descriptor
+				};
+
+				vkUpdateDescriptorSets(deviceIF.logical.device, 1, &writeDesriptorSet, 0, nullptr);
 			}
-
-			VkWriteDescriptorSet writeDesriptorSet{
-				.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-				.dstSet = descriptorSet,
-				.dstBinding = 0,
-				.descriptorCount = static_cast<uint32_t>(fields.size()),
-				.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-				.pImageInfo = descriptorList.data()
-			};
-
-			vkUpdateDescriptorSets(deviceIF.logical.device, 1, &writeDesriptorSet, 0, nullptr);
 		}
 
 		void setupPipeline() {
@@ -728,9 +728,25 @@ class Renderer {
 
 				validateResult( vkBeginCommandBuffer( commandBuffer, &commandBufferBeginInfo ) );
 			
+				VkViewport viewport{
+				.width = float(windowIF.dimensions.x),
+				.height = float(windowIF.dimensions.y),
+				.minDepth = 0.0f,
+				.maxDepth = 1.0f
+				};
+
+				vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+				VkRect2D scissor{
+					.extent {
+						.width = static_cast<uint32_t>(windowIF.dimensions.x),
+						.height = static_cast<uint32_t>(windowIF.dimensions.y),
+					}
+				};
+				vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+
 				VkRenderingAttachmentInfo colorAttachmentInfo{
 					.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-					.imageView = deviceIF.logical.swapchainConfiguration.swapchainImageViews[ imageIndex ],
+					.imageView = fields[(simulationIndex + 1) % 2].imageView,
 					.imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
 					.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
 					.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
@@ -752,14 +768,14 @@ class Renderer {
 					.pColorAttachments = &colorAttachmentInfo
 				};
 
-				VkImageMemoryBarrier2 outputBarrier{
+				VkImageMemoryBarrier2 transitionSwapchainImageToGetTextureData{
 						.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-						.srcStageMask = VK_PIPELINE_STAGE_NONE,
-						.srcAccessMask = 0,
-						.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-						.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+						.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+						.srcAccessMask = VK_ACCESS_2_NONE,
+						.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+						.dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
 						.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-						.newLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+						.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 						.image = deviceIF.logical.swapchainConfiguration.swapchainImages[imageIndex],
 						.subresourceRange {
 							.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -768,56 +784,167 @@ class Renderer {
 						}
 				};
 
-				VkDependencyInfo barrierDependencyInfo{
+				VkDependencyInfo transitionSwapchainImageToGetTextureDataDependencyInfo{
 					.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
 					.imageMemoryBarrierCount = 1,
-					.pImageMemoryBarriers = &outputBarrier
+					.pImageMemoryBarriers = &transitionSwapchainImageToGetTextureData
 				};
 
-				vkCmdPipelineBarrier2(commandBuffer, &barrierDependencyInfo);
+				vkCmdPipelineBarrier2(commandBuffer, &transitionSwapchainImageToGetTextureDataDependencyInfo);
 
-				VkViewport viewport{
-					.width = float(windowIF.dimensions.x),
-					.height = float(windowIF.dimensions.y),
-					.minDepth = 0.0f,
-					.maxDepth = 1.0f
-				};
+				VkImageMemoryBarrier2 transitionAttachementfromReadtoGetWritten{
+					.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
 
-				vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
-				VkRect2D scissor{
-					.extent {
-						.width = static_cast<uint32_t>(windowIF.dimensions.x),
-						.height = static_cast<uint32_t>(windowIF.dimensions.y),
+					.srcStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+					.srcAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+
+					.dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+					.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+
+					.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+					.newLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+
+					.image = fields[(simulationIndex + 1) % 2].image,
+
+					.subresourceRange{
+						.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+						.levelCount = 1,
+						.layerCount = 1
 					}
 				};
-				vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+
+				VkDependencyInfo transitionAttachementfromReadtoGetWrittenDependencyInfo{
+					.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+					.imageMemoryBarrierCount = 1,
+					.pImageMemoryBarriers = &transitionAttachementfromReadtoGetWritten
+				};
+
+				vkCmdPipelineBarrier2(commandBuffer, &transitionAttachementfromReadtoGetWrittenDependencyInfo);
+
+				/*VkDescriptorImageInfo imageInfo{
+					.sampler = fields[simulationIndex].sampler,
+					.imageView = fields[simulationIndex].imageView,
+					.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+				};
+
+				VkWriteDescriptorSet write{
+					.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+					.dstSet = descriptorSet,
+					.dstBinding = 0,
+					.descriptorCount = 1,
+					.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+					.pImageInfo = &imageInfo
+				};
+
+				vkUpdateDescriptorSets(deviceIF.logical.device, 1, &write, 0, nullptr);*/
 
 				vkCmdBeginRendering(commandBuffer, &renderingInfo);
-				
+
 				vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-				vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
+				vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[simulationIndex], 0, nullptr);
 				vkCmdDraw(commandBuffer, 3, 1, 0, 0 );
 
 				vkCmdEndRendering(commandBuffer);
-				
+
+				VkImageMemoryBarrier2 transitionAttachmentFromWriteToRead{
+					.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+					.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+					.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+					.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+					.dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT,
+					.oldLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+					.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+					.image = fields[(simulationIndex + 1) % 2].image,
+					.subresourceRange{
+						.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+						.levelCount = 1,
+						.layerCount = 1
+					}
+				};
+				VkDependencyInfo transitionAttachmentFromWriteToReadDependencyInfo{
+					.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+					.imageMemoryBarrierCount = 1,
+					.pImageMemoryBarriers = &transitionAttachmentFromWriteToRead
+				};
+				vkCmdPipelineBarrier2(commandBuffer, &transitionAttachmentFromWriteToReadDependencyInfo);
+
+				VkImageCopy copyRegion{
+					.srcSubresource{
+						.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+						.layerCount = 1
+					},
+					.dstSubresource{
+						.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+						.layerCount = 1
+					},
+					.extent{
+						.width = static_cast<uint32_t>(windowIF.dimensions.x),
+						.height = static_cast<uint32_t>(windowIF.dimensions.y),
+						.depth = 1
+					}
+				};
+
+				vkCmdCopyImage(
+					commandBuffer,
+					fields[(simulationIndex + 1) % 2].image,
+					VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+					deviceIF.logical.swapchainConfiguration.swapchainImages[imageIndex],
+					VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+					1,
+					&copyRegion
+				);
+
+				VkImageMemoryBarrier2 transitionAttachmentFromGettingReadToSampling{
+					.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+
+					.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+					.srcAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT,
+
+					.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+					.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+
+					.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+					.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+
+					.image = fields[(simulationIndex + 1) % 2].image,
+
+					.subresourceRange{
+						.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+						.levelCount = 1,
+						.layerCount = 1
+					}
+				};
+
+				VkDependencyInfo transitionAttachmentFromGettingReadToSamplingDependencyInfo{
+					.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+					.imageMemoryBarrierCount = 1,
+					.pImageMemoryBarriers = &transitionAttachmentFromGettingReadToSampling
+				};
+
+				vkCmdPipelineBarrier2(commandBuffer, &transitionAttachmentFromGettingReadToSamplingDependencyInfo);
 
 				VkImageMemoryBarrier2 barrierPresent{
 					.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-					.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-					.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-					.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-					.dstAccessMask = 0,
-					.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+					.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+					.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+					.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+					.dstAccessMask = VK_ACCESS_2_NONE,
+					.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 					.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
 					.image = deviceIF.logical.swapchainConfiguration.swapchainImages[imageIndex],
-					.subresourceRange{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1 }
+					.subresourceRange{
+						.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+						.levelCount = 1,
+						.layerCount = 1
+					}
 				};
-				VkDependencyInfo barrierPresentDependencyInfo{
+
+				VkDependencyInfo barrierPresentDependencyInfo12{
 					.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
 					.imageMemoryBarrierCount = 1,
 					.pImageMemoryBarriers = &barrierPresent
 				};
-				vkCmdPipelineBarrier2(commandBuffer, &barrierPresentDependencyInfo);
+				vkCmdPipelineBarrier2(commandBuffer, &barrierPresentDependencyInfo12);
 
 				vkEndCommandBuffer(commandBuffer);
 
@@ -835,6 +962,7 @@ class Renderer {
 				validateResult(vkQueueSubmit(deviceIF.queue.queue, 1, &submitInfo, deviceIF.logical.swapchainConfiguration.fences[frameIndex]), "Failed to Submit Queue");
 
 				frameIndex = (frameIndex + 1) % deviceIF.logical.swapchainConfiguration.maxFramesInFlight;
+				simulationIndex = (simulationIndex + 1) % 2;
 
 				VkPresentInfoKHR presentInfo{
 					.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
@@ -849,6 +977,11 @@ class Renderer {
 				if (deviceIF.logical.swapchainConfiguration.updateSwapchain) {
 					recreateSwapchain();
 				}
+
+				//vkQueueWaitIdle( deviceIF.queue.queue );
+				//vkDeviceWaitIdle(deviceIF.logical.device);
+
+				SDL_Delay(1000);
 			}
 		}
 
@@ -947,13 +1080,15 @@ class Renderer {
 
 		VkDescriptorPool descriptorPool;
 		VkDescriptorSetLayout descriptorSetLayout;
-		VkDescriptorSet descriptorSet;
+		std::vector< VkDescriptorSet > descriptorSets;
+		std::vector<VkDescriptorSetLayout> descriptorSetLayouts;
 
 		VkPipelineLayout pipelineLayout;
 		VkPipeline pipeline;
 
 		int frameIndex = 0;
 		uint32_t imageIndex = 0;
+		int simulationIndex = 0;
 
 		std::vector<FieldState> fields;
 };
