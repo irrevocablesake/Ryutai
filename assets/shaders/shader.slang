@@ -26,8 +26,11 @@ VSOutput main( VSInput input ) {
     return output;
 }
 
+Sampler2D texture;
+
 [shader("fragment")]
 float4 main() : SV_Target {
-    float3 color = float3( 1.0, 0.0, 0.0 );
+    // float3 color = float3( 1.0, 0.0, 0.0 );
+    float3 color = texture.Sample(float2(0.0, 0.0)).rgb;
     return float4( color, 1.0);
 }

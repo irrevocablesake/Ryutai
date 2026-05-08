@@ -343,7 +343,8 @@ class Renderer {
 				.format = deviceIF.logical.swapchainConfiguration.imageFormat,
 				.extent{
 					.width = windowIF.surfaceCapabilities.currentExtent.width,
-					.height = windowIF.surfaceCapabilities.currentExtent.height
+					.height = windowIF.surfaceCapabilities.currentExtent.height,
+					.depth = 1
 				},
 				.mipLevels = 1,
 				.arrayLayers = 1,
@@ -400,7 +401,7 @@ class Renderer {
 				.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
 				.dstAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
 				.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-				.newLayout = VK_IMAGE_LAYOUT_GENERAL,
+				.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 				.image = image,
 				.subresourceRange = {
 					.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -416,6 +417,38 @@ class Renderer {
 			};
 
 			vkCmdPipelineBarrier2(commandBufferOneTime, &barrierDependencyInfo);
+
+			VkClearColorValue clearValue = { 0.0f, 1.0f, 0.0f, 1.0f };
+			VkImageSubresourceRange range{
+				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				.levelCount = 1,
+				.layerCount = 1
+			};
+			vkCmdClearColorImage( commandBufferOneTime, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearValue, 1, &range );
+
+			VkImageMemoryBarrier2 barrierLayoutTransition1{
+				.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+				.srcStageMask = VK_PIPELINE_STAGE_2_NONE,
+				.srcAccessMask = VK_ACCESS_2_NONE,
+				.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+				.dstAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+				.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+				.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+				.image = image,
+				.subresourceRange = {
+					.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+					.levelCount = 1,
+					.layerCount = 1
+				}
+			};
+
+			VkDependencyInfo barrierDependencyInfo1{
+				.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+				.imageMemoryBarrierCount = 1,
+				.pImageMemoryBarriers = &barrierLayoutTransition1
+			};
+
+			vkCmdPipelineBarrier2(commandBufferOneTime, &barrierDependencyInfo1);
 
 			validateResult(vkEndCommandBuffer(commandBufferOneTime));
 
@@ -433,7 +466,6 @@ class Renderer {
 				.magFilter = VK_FILTER_LINEAR,
 				.minFilter = VK_FILTER_LINEAR,
 				.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
-				.anisotropyEnable = VK_TRUE,
 				.maxAnisotropy = 8.0f,
 				.maxLod = 1
 			};
@@ -498,8 +530,8 @@ class Renderer {
 		void setupPipeline() {
 			VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo{
 				.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-				.setLayoutCount = 0,
-				.pSetLayouts = nullptr
+				.setLayoutCount = 1,
+				.pSetLayouts = &descriptorSetLayout
 			};
 
 			validateResult( vkCreatePipelineLayout( deviceIF.logical.device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayout  ) );
@@ -727,11 +759,11 @@ class Renderer {
 				vkCmdBeginRendering(commandBuffer, &renderingInfo);
 				
 				vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-				//vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
+				vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
 				vkCmdDraw(commandBuffer, 3, 1, 0, 0 );
 
 				vkCmdEndRendering(commandBuffer);
-				vkEndCommandBuffer(commandBuffer);
+				
 
 				VkImageMemoryBarrier2 barrierPresent{
 					.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
@@ -750,6 +782,8 @@ class Renderer {
 					.pImageMemoryBarriers = &barrierPresent
 				};
 				vkCmdPipelineBarrier2(commandBuffer, &barrierPresentDependencyInfo);
+
+				vkEndCommandBuffer(commandBuffer);
 
 				VkPipelineStageFlags waitStages = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 				VkSubmitInfo submitInfo{
@@ -793,7 +827,7 @@ class Renderer {
 			setupSync2();
 			setupCommandBuffers();
 			loadAndCompileShaders();
-			//loadTextures();
+			loadTextures();
 			setupPipeline();
 			animate();
 		}
