@@ -20,6 +20,11 @@
 #include<vector>
 #include<array>
 
+#include <cmath>
+#include <cstdint>
+#include <random>
+#include <numeric>
+
 class Renderer {
 
 	public:
@@ -343,6 +348,7 @@ class Renderer {
 			VkDescriptorImageInfo descriptor;
 
 			VkClearColorValue clearColor;
+			bool noise = false;
 		};
 
 		void clearImage( FieldState &fieldState, VkClearColorValue &clearValue ) {
@@ -434,14 +440,196 @@ class Renderer {
 			validateResult(vkWaitForFences(deviceIF.logical.device, 1, &fenceOneTime, VK_TRUE, UINT64_MAX));
 		}
 
-		FieldState generateField( VkClearColorValue clearValue ) {
+		int perm[512];
 
-			FieldState fieldState;
+		 float fade(float t) {
+			return t * t * t * (t * (t * 6 - 15) + 10);
+		}
+
+		 float lerp(float a, float b, float t) {
+			return a + t * (b - a);
+		}
+
+		 float grad(int hash, float x, float y) {
+			int h = hash & 3;
+			float u = h < 2 ? x : y;
+			float v = h < 2 ? y : x;
+			return ((h & 1) ? -u : u) + ((h & 2) ? -2.0f * v : 2.0f * v);
+		}
+
+		 float perlin(float x, float y) {
+			int X = (int)floor(x) & 255;
+			int Y = (int)floor(y) & 255;
+
+			float xf = x - floor(x);
+			float yf = y - floor(y);
+
+			float u = fade(xf);
+			float v = fade(yf);
+
+			int aa = perm[X + perm[Y]];
+			int ab = perm[X + perm[Y + 1]];
+			int ba = perm[X + 1 + perm[Y]];
+			int bb = perm[X + 1 + perm[Y + 1]];
+
+			float x1 = lerp(grad(aa, xf, yf), grad(ba, xf - 1, yf), u);
+			float x2 = lerp(grad(ab, xf, yf - 1), grad(bb, xf - 1, yf - 1), u);
+
+			return lerp(x1, x2, v);
+		}
+
+		std::vector<uint8_t> generatePerlinTexture(int width, int height, float scale)
+		{
+			std::vector<uint8_t> data(width * height * 4);
+
+			for (int y = 0; y < height; y++) {
+				for (int x = 0; x < width; x++) {
+
+					float nx = x * scale;
+					float ny = y * scale;
+
+					float n = perlin(nx, ny);
+
+					n = 0.5f * (n + 1.0f);
+
+					uint8_t value = static_cast<uint8_t>(n * 255.0f);
+
+					size_t idx = (static_cast<size_t>(y) * width + x) * 4;
+					data[idx + 0] = value; 
+					data[idx + 1] = 255 - value; 
+					data[idx + 2] = value; 
+					data[idx + 3] = 255;   
+				}
+			}
+
+			return data;
+		}
+
+		void clearImageWithNoise( FieldState fieldState ) {
+			auto buffer = generatePerlinTexture(windowIF.surfaceCapabilities.currentExtent.width, windowIF.surfaceCapabilities.currentExtent.height, 0.005f);
+			uint32_t bufferSize = windowIF.surfaceCapabilities.currentExtent.width * windowIF.surfaceCapabilities.currentExtent.width * 4;
+			VkBuffer imageSourceBuffer{};
+			VmaAllocation imageSourceAllocation{};
+			VkBufferCreateInfo imageSourceBufferCreateInfo{
+				.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+				.size = bufferSize,
+				.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT
+			};
+
+			VmaAllocationCreateInfo imageSourceAllocationCreateInfo{
+				.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
+				.usage = VMA_MEMORY_USAGE_AUTO
+			};
+
+			validateResult(vmaCreateBuffer(vmaAllocator, &imageSourceBufferCreateInfo, &imageSourceAllocationCreateInfo, &imageSourceBuffer, &imageSourceAllocation, nullptr), "Failed to Create VMA Buffer");
+
+			void* imageSourceBufferPtr{ nullptr };
+			validateResult(vmaMapMemory(vmaAllocator, imageSourceAllocation, &imageSourceBufferPtr), "Failed to Map Memory for Staging Buffer of Image");
+			memcpy(imageSourceBufferPtr, buffer.data(), buffer.size());
+
+			VkFenceCreateInfo fenceOneTimeCreateInfo{
+				.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO
+			};
+			VkFence fenceOneTime{};
+
+			validateResult(vkCreateFence(deviceIF.logical.device, &fenceOneTimeCreateInfo, nullptr, &fenceOneTime), "Failed to Create one time Fence");
+
+			VkCommandBuffer commandBufferOneTime{};
+			VkCommandBufferAllocateInfo commandBufferOneTimeAllocationInfo{
+				.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+				.commandPool = deviceIF.logical.commandPool,
+				.commandBufferCount = 1
+			};
+
+			validateResult(vkAllocateCommandBuffers(deviceIF.logical.device, &commandBufferOneTimeAllocationInfo, &commandBufferOneTime), "Failed to Allocate one time command buffer");
+
+			VkCommandBufferBeginInfo commandBufferOneTimeBeginInfo{
+				.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+				.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
+			};
+
+			validateResult(vkBeginCommandBuffer(commandBufferOneTime, &commandBufferOneTimeBeginInfo), "Failed To Begin Command Buffer");
+
+			VkImageMemoryBarrier2 barrierTextureImage{
+				.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+				.srcStageMask = VK_PIPELINE_STAGE_2_NONE,
+				.srcAccessMask = VK_ACCESS_2_NONE,
+				.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+				.dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+				.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+				.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+				.image = fieldState.image,
+				.subresourceRange = {
+					.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+					.levelCount = 1,
+					.layerCount = 1
+				}
+			};
+
+			VkDependencyInfo barrierTextureInfo{
+				.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+				.imageMemoryBarrierCount = 1,
+				.pImageMemoryBarriers = &barrierTextureImage
+			};
+
+			vkCmdPipelineBarrier2(commandBufferOneTime, &barrierTextureInfo);
+
+			VkBufferImageCopy copyRegions{
+					.bufferOffset = 0,
+					.imageSubresource {
+						.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+						.mipLevel = 0,
+						.layerCount = 1
+					},
+					.imageExtent {
+						.width = windowIF.surfaceCapabilities.currentExtent.width,
+						.height = windowIF.surfaceCapabilities.currentExtent.height,
+						.depth = 1
+					}
+				};
+			vkCmdCopyBufferToImage(commandBufferOneTime, imageSourceBuffer, fieldState.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegions);
+
+			VkImageMemoryBarrier2 barrierTextureRead{
+				.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+				.srcStageMask = VK_PIPELINE_STAGE_TRANSFER_BIT,
+				.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+				.dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+				.dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+				.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+				.newLayout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
+				.image = fieldState.image,
+				.subresourceRange = {
+					.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+					.levelCount = 1,
+					.layerCount = 1
+				}
+			};
+
+			barrierTextureInfo.pImageMemoryBarriers = &barrierTextureRead;
+
+			vkCmdPipelineBarrier2(commandBufferOneTime, &barrierTextureInfo);
+
+			validateResult(vkEndCommandBuffer(commandBufferOneTime), "Failed to end Command buffer");
+
+			VkSubmitInfo oneTimeSubmitInfo{
+				.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+				.commandBufferCount = 1,
+				.pCommandBuffers = &commandBufferOneTime
+			};
+
+			validateResult(vkQueueSubmit( deviceIF.queue.queue, 1, &oneTimeSubmitInfo, fenceOneTime), "Failed to submit to queue");
+			validateResult(vkWaitForFences(deviceIF.logical.device, 1, &fenceOneTime, VK_TRUE, UINT64_MAX), "Failed to Wait for Fences");
+
+		}
+
+		FieldState generateField( VkClearColorValue clearValue, bool noise ) {
+
+			FieldState fieldState{};
 
 			VkImageCreateInfo textureImageCreateInfo{
 				.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
 				.imageType = VK_IMAGE_TYPE_2D,
-				.format = deviceIF.logical.swapchainConfiguration.imageFormat,
+				.format = VK_FORMAT_R8G8B8A8_UNORM,
 				.extent{
 					.width = windowIF.surfaceCapabilities.currentExtent.width,
 					.height = windowIF.surfaceCapabilities.currentExtent.height,
@@ -474,7 +662,12 @@ class Renderer {
 
 			validateResult(vkCreateImageView(deviceIF.logical.device, &textureImageViewCreateInfo, nullptr, &fieldState.imageView));
 
-			clearImage( fieldState, clearValue );
+			if ( noise) {
+				clearImageWithNoise( fieldState );
+			}
+			else {
+				clearImage( fieldState, clearValue );
+			}
 
 			VkSamplerCreateInfo samplerCreateInfo{
 				.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
@@ -497,22 +690,31 @@ class Renderer {
 		}
 
 		void generateFields() {
-			FieldState vectorFieldA = generateField(VkClearColorValue{ 1.0, 0.0, 0.0 });
-			FieldState vectorFieldB = generateField(VkClearColorValue{ 0.0, 1.0, 0.0 });
+			FieldState vectorFieldA = generateField(VkClearColorValue{ 0.0, 0.0, 0.0 }, true);
+			FieldState vectorFieldB = generateField(VkClearColorValue{ 0.0, 0.0, 0.0 }, false);
 
-			fields.push_back(vectorFieldA);
-			fields.push_back(vectorFieldB);
+			FieldState densityFieldA = generateField(VkClearColorValue{ 0.0, 0.0, 0.0 }, true);
+			FieldState densityFieldB = generateField(VkClearColorValue{ 0.0, 0.0, 0.0 }, false);
+
+			fieldsA.push_back(vectorFieldA);
+			fieldsA.push_back(densityFieldA);
+
+			fieldsB.push_back(vectorFieldB);
+			fieldsB.push_back(densityFieldB);
+
+			fields.push_back(fieldsA);
+			fields.push_back(fieldsB);
+
+			descriptorSets.resize(fields.size());
 
 			uploadFields();
 		}
 
 		void uploadFields() {
 
-			descriptorSets.resize(fields.size());
-
 			VkDescriptorPoolSize poolSize{
 				.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-				.descriptorCount = static_cast< uint32_t>( fields.size())
+				.descriptorCount = static_cast< uint32_t >(fields.size() * fieldsA.size())
 			};
 
 			VkDescriptorPoolCreateInfo descriptorPoolCreateInfo{
@@ -524,58 +726,64 @@ class Renderer {
 
 			validateResult( vkCreateDescriptorPool( deviceIF.logical.device, &descriptorPoolCreateInfo, nullptr, &descriptorPool  ));
 	
-			VkDescriptorSetLayoutBinding binding{
+			VkDescriptorSetLayoutBinding binding0{
 				.binding = 0,
 				.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
 				.descriptorCount = 1,
 				.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT
 			};
+
+			VkDescriptorSetLayoutBinding binding1{
+				.binding = 1,
+				.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+				.descriptorCount = 1,
+				.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT
+			};
+
+			std::vector< VkDescriptorSetLayoutBinding > binding;
+			binding.push_back(binding0);
+			binding.push_back(binding1);
 			
 			VkDescriptorSetLayoutCreateInfo descriptorLayoutCreateInfo{
 				.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-				.bindingCount = 1,
-				.pBindings = &binding
+				.bindingCount = static_cast<uint32_t>(fields.size()),
+				.pBindings = binding.data()
 			};
 
 			validateResult( vkCreateDescriptorSetLayout( deviceIF.logical.device, &descriptorLayoutCreateInfo, nullptr, &descriptorSetLayout ) );
 		
-			descriptorSetLayouts = std::vector<VkDescriptorSetLayout>(fields.size(), descriptorSetLayout);
+			descriptorSetLayouts = std::vector<VkDescriptorSetLayout>(2 , descriptorSetLayout);
 			VkDescriptorSetAllocateInfo descriptorAllocateInfo{
 				.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
 				.descriptorPool = descriptorPool,
-				.descriptorSetCount = static_cast< uint32_t>(fields.size()),
+				.descriptorSetCount = static_cast<uint32_t>(fields.size()),
 				.pSetLayouts = descriptorSetLayouts.data()
 			};
 
 			validateResult( vkAllocateDescriptorSets( deviceIF.logical.device, &descriptorAllocateInfo, descriptorSets.data()));
 		
 			for (uint32_t index = 0; index < fields.size(); index++) {
-				VkWriteDescriptorSet writeDesriptorSet{
-					.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-					.dstSet = descriptorSets[ index ],
-					.dstBinding = 0,
-					.descriptorCount = 1,
-					.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-					.pImageInfo = &fields[index].descriptor
-				};
 
-				vkUpdateDescriptorSets(deviceIF.logical.device, 1, &writeDesriptorSet, 0, nullptr);
+				for (uint32_t j = 0; j < fields[index].size(); j++) {
+					VkWriteDescriptorSet writeDesriptorSet{
+						.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+						.dstSet = descriptorSets[ index ],
+						.dstBinding = j,
+						.descriptorCount = 1,
+						.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+						.pImageInfo = &fields[index][j].descriptor
+					};
+
+					vkUpdateDescriptorSets(deviceIF.logical.device, 1, &writeDesriptorSet, 0, nullptr);
+				}
 			}
 		}
 
-		void setupPipeline() {
-			VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo{
-				.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-				.setLayoutCount = 1,
-				.pSetLayouts = &descriptorSetLayout
-			};
-
-			validateResult( vkCreatePipelineLayout( deviceIF.logical.device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayout  ) );
-		
+		void createPipeline( VkPipeline &pipeline, std::vector< VkPipelineShaderStageCreateInfo > &shaderStages) {
 			VkPipelineVertexInputStateCreateInfo vertexInputState{
 				.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
 				.vertexBindingDescriptionCount = 0,
-				.pVertexBindingDescriptions= nullptr,
+				.pVertexBindingDescriptions = nullptr,
 				.vertexAttributeDescriptionCount = 0,
 				.pVertexAttributeDescriptions = nullptr,
 			};
@@ -583,21 +791,6 @@ class Renderer {
 			VkPipelineInputAssemblyStateCreateInfo inputAssemblyState{
 				.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
 				.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
-			};
-
-			std::vector< VkPipelineShaderStageCreateInfo > shaderStages{
-				{
-					.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-					.stage = VK_SHADER_STAGE_VERTEX_BIT,
-					.module = shaderModule,
-					.pName = "main"
-				},
-				{
-					.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-					.stage = VK_SHADER_STAGE_FRAGMENT_BIT,
-					.module = shaderModule,
-					.pName = "main"
-				}
 			};
 
 			std::vector< VkDynamicState > dynamicStates{
@@ -623,10 +816,11 @@ class Renderer {
 				.depthWriteEnable = VK_FALSE
 			};
 
+			VkFormat mmformat = VK_FORMAT_R8G8B8A8_UNORM;
 			VkPipelineRenderingCreateInfo renderingCreateInfo{
 				.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
 				.colorAttachmentCount = 1,
-				.pColorAttachmentFormats = &deviceIF.logical.swapchainConfiguration.imageFormat,
+				.pColorAttachmentFormats = &mmformat,
 			};
 
 			VkPipelineColorBlendAttachmentState blendAttachment{
@@ -667,7 +861,49 @@ class Renderer {
 				.layout = pipelineLayout
 			};
 
-			validateResult(vkCreateGraphicsPipelines( deviceIF.logical.device, nullptr, 1, &pipelineCreateInfo, nullptr, &pipeline  ));
+			validateResult(vkCreateGraphicsPipelines(deviceIF.logical.device, nullptr, 1, &pipelineCreateInfo, nullptr, &pipeline));
+		}
+
+		void setupPipeline() {
+			VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo{
+				.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+				.setLayoutCount = 1,
+				.pSetLayouts = &descriptorSetLayout
+			};
+
+			validateResult( vkCreatePipelineLayout( deviceIF.logical.device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayout  ) );
+		
+			std::vector< VkPipelineShaderStageCreateInfo > velocityShaderStages{
+				{
+					.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+					.stage = VK_SHADER_STAGE_VERTEX_BIT,
+					.module = shaderModule,
+					.pName = "main"
+				},
+				{
+					.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+					.stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+					.module = shaderModule,
+					.pName = "velocityPass"
+				}
+			};
+			createPipeline( velocityPipeline, velocityShaderStages);
+
+			std::vector< VkPipelineShaderStageCreateInfo > densityShaderStages{
+				{
+					.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+					.stage = VK_SHADER_STAGE_VERTEX_BIT,
+					.module = shaderModule,
+					.pName = "main"
+				},
+				{
+					.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+					.stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+					.module = shaderModule,
+					.pName = "densityPass"
+				}
+			};
+			createPipeline( densityPipeline, densityShaderStages);
 		}
 
 		void recreateSwapchain() {
@@ -729,10 +965,10 @@ class Renderer {
 				validateResult( vkBeginCommandBuffer( commandBuffer, &commandBufferBeginInfo ) );
 			
 				VkViewport viewport{
-				.width = float(windowIF.dimensions.x),
-				.height = float(windowIF.dimensions.y),
-				.minDepth = 0.0f,
-				.maxDepth = 1.0f
+					.width = float(windowIF.dimensions.x),
+					.height = float(windowIF.dimensions.y),
+					.minDepth = 0.0f,
+					.maxDepth = 1.0f
 				};
 
 				vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
@@ -746,7 +982,7 @@ class Renderer {
 
 				VkRenderingAttachmentInfo colorAttachmentInfo{
 					.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-					.imageView = fields[(simulationIndex + 1) % 2].imageView,
+					.imageView = fields[(simulationIndex + 1) % 2][0].imageView,
 					.imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
 					.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
 					.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
@@ -792,6 +1028,30 @@ class Renderer {
 
 				vkCmdPipelineBarrier2(commandBuffer, &transitionSwapchainImageToGetTextureDataDependencyInfo);
 
+				VkImageMemoryBarrier2 barrierLayoutTransition{
+					.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+					.srcStageMask = VK_PIPELINE_STAGE_2_NONE,
+					.srcAccessMask = VK_ACCESS_2_NONE,
+					.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+					.dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+					.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+					.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+					.image = fields[(simulationIndex + 1) % 2][0].image,
+					.subresourceRange = {
+						.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+						.levelCount = 1,
+						.layerCount = 1
+					}
+				};
+
+				VkDependencyInfo barrierDependencyInfo{
+					.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+					.imageMemoryBarrierCount = 1,
+					.pImageMemoryBarriers = &barrierLayoutTransition
+				};
+
+				vkCmdPipelineBarrier2(commandBuffer, &barrierDependencyInfo);
+
 				VkImageMemoryBarrier2 transitionAttachementfromReadtoGetWritten{
 					.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
 
@@ -804,7 +1064,7 @@ class Renderer {
 					.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
 					.newLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
 
-					.image = fields[(simulationIndex + 1) % 2].image,
+					.image = fields[(simulationIndex + 1) % 2][0].image,
 
 					.subresourceRange{
 						.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -821,28 +1081,100 @@ class Renderer {
 
 				vkCmdPipelineBarrier2(commandBuffer, &transitionAttachementfromReadtoGetWrittenDependencyInfo);
 
-				/*VkDescriptorImageInfo imageInfo{
-					.sampler = fields[simulationIndex].sampler,
-					.imageView = fields[simulationIndex].imageView,
-					.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-				};
-
-				VkWriteDescriptorSet write{
-					.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-					.dstSet = descriptorSet,
-					.dstBinding = 0,
-					.descriptorCount = 1,
-					.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-					.pImageInfo = &imageInfo
-				};
-
-				vkUpdateDescriptorSets(deviceIF.logical.device, 1, &write, 0, nullptr);*/
-
 				vkCmdBeginRendering(commandBuffer, &renderingInfo);
 
-				vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+				vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, velocityPipeline);
 				vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[simulationIndex], 0, nullptr);
 				vkCmdDraw(commandBuffer, 3, 1, 0, 0 );
+
+				vkCmdEndRendering(commandBuffer);
+
+				VkImageMemoryBarrier2 velocityBarrier{
+					.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+
+					.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+					.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+
+					.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+					.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+
+					.oldLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+					.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+
+					.image = fields[(simulationIndex + 1) % 2][0].image,
+					.subresourceRange = {
+						.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+						.levelCount = 1,
+						.layerCount = 1
+					}
+				};
+
+				VkDependencyInfo info{
+					.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+					.imageMemoryBarrierCount = 1,
+					.pImageMemoryBarriers = &velocityBarrier
+				};
+
+				vkCmdPipelineBarrier2(commandBuffer, &info);
+
+				VkRenderingAttachmentInfo colorAttachmentInfo1{
+					.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+					.imageView = fields[(simulationIndex + 1) % 2][1].imageView,
+					.imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+					.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+					.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+					.clearValue{
+						windowIF.clearColor
+					}
+				};
+
+				VkRenderingInfo renderingInfo1{
+					.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+					.renderArea{
+						.extent{
+							.width = static_cast<uint32_t>(windowIF.dimensions.x),
+							.height = static_cast<uint32_t>(windowIF.dimensions.y)
+						},
+					},
+					.layerCount = 1,
+					.colorAttachmentCount = 1,
+					.pColorAttachments = &colorAttachmentInfo1
+				};
+
+				VkImageMemoryBarrier2 transitionAttachementfromReadtoGetWritten1{
+					.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+
+					.srcStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+					.srcAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+
+					.dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+					.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+
+					.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+					.newLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+
+					.image = fields[(simulationIndex + 1) % 2][1].image,
+
+					.subresourceRange{
+						.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+						.levelCount = 1,
+						.layerCount = 1
+					}
+				};
+
+				VkDependencyInfo transitionAttachementfromReadtoGetWrittenDependencyInfo1{
+					.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+					.imageMemoryBarrierCount = 1,
+					.pImageMemoryBarriers = &transitionAttachementfromReadtoGetWritten1
+				};
+
+				vkCmdPipelineBarrier2(commandBuffer, &transitionAttachementfromReadtoGetWrittenDependencyInfo1);
+
+				vkCmdBeginRendering(commandBuffer, &renderingInfo1);
+
+				vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, densityPipeline);
+				vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[simulationIndex], 0, nullptr);
+				vkCmdDraw(commandBuffer, 3, 1, 0, 0);
 
 				vkCmdEndRendering(commandBuffer);
 
@@ -854,7 +1186,7 @@ class Renderer {
 					.dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT,
 					.oldLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
 					.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-					.image = fields[(simulationIndex + 1) % 2].image,
+					.image = fields[(simulationIndex + 1) % 2][1].image,
 					.subresourceRange{
 						.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
 						.levelCount = 1,
@@ -884,14 +1216,32 @@ class Renderer {
 					}
 				};
 
-				vkCmdCopyImage(
+				VkImageBlit blit{};
+				// Source coordinates (0,0 to Width,Height)
+				blit.srcOffsets[0] = { 0, 0, 0 };
+				blit.srcOffsets[1] = { static_cast<int>(windowIF.dimensions.x), static_cast<int>(windowIF.dimensions.y), 1 };
+				blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+				blit.srcSubresource.mipLevel = 0;
+				blit.srcSubresource.baseArrayLayer = 0;
+				blit.srcSubresource.layerCount = 1;
+
+				// Destination coordinates (same as source for 1:1 scale)
+				blit.dstOffsets[0] = { 0, 0, 0 };
+				blit.dstOffsets[1] = { static_cast<int>(windowIF.dimensions.x), static_cast<int>(windowIF.dimensions.y), 1 };
+				blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+				blit.dstSubresource.mipLevel = 0;
+				blit.dstSubresource.baseArrayLayer = 0;
+				blit.dstSubresource.layerCount = 1;
+
+				vkCmdBlitImage(
 					commandBuffer,
-					fields[(simulationIndex + 1) % 2].image,
+					fields[static_cast<size_t>((simulationIndex + 1) % 2)][1].image,
 					VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
 					deviceIF.logical.swapchainConfiguration.swapchainImages[imageIndex],
 					VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 					1,
-					&copyRegion
+					&blit,
+					VK_FILTER_LINEAR
 				);
 
 				VkImageMemoryBarrier2 transitionAttachmentFromGettingReadToSampling{
@@ -906,7 +1256,7 @@ class Renderer {
 					.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
 					.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
 
-					.image = fields[(simulationIndex + 1) % 2].image,
+					.image = fields[(simulationIndex + 1) % 2][1].image,
 
 					.subresourceRange{
 						.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -978,14 +1328,27 @@ class Renderer {
 					recreateSwapchain();
 				}
 
-				//vkQueueWaitIdle( deviceIF.queue.queue );
-				//vkDeviceWaitIdle(deviceIF.logical.device);
+				/*vkQueueWaitIdle( deviceIF.queue.queue );
+				vkDeviceWaitIdle(deviceIF.logical.device);*/
 
-				SDL_Delay(1000);
+				SDL_Delay(100);
 			}
 		}
 
 		void setup() {
+
+			std::vector<int> p(256);
+			std::iota(p.begin(), p.end(), 0);
+
+			std::random_device rd;
+			std::mt19937 rng(rd());
+
+			std::shuffle(p.begin(), p.end(), rng);
+
+			for (int i = 0; i < 256; i++) {
+				perm[i] = perm[i + 256] = p[i];
+			}
+
 			setupLibraries();
 			setupInstance();
 			pickPhysicalDeviceAndQueueIndex();
@@ -1084,13 +1447,16 @@ class Renderer {
 		std::vector<VkDescriptorSetLayout> descriptorSetLayouts;
 
 		VkPipelineLayout pipelineLayout;
-		VkPipeline pipeline;
+		VkPipeline velocityPipeline;
+		VkPipeline densityPipeline;
 
 		int frameIndex = 0;
 		uint32_t imageIndex = 0;
 		int simulationIndex = 0;
 
-		std::vector<FieldState> fields;
+		std::vector<std::vector<FieldState>> fields;
+		std::vector<FieldState> fieldsA;
+		std::vector<FieldState> fieldsB;
 };
 
 class Ryutai {
