@@ -34,54 +34,53 @@ Sampler2D fieldA;
 [[vk::binding(1, 0)]]
 Sampler2D fieldB;
 
-static const float dt = 0.016;
+static const float dt = 0.6;
+static const float texelX = 1.0 / 1920.0f;
+static const float texelY = 1.0 / 1200.0f;
+static const float2 texelSize = float2(texelX, texelY);
 
 [shader("fragment")]
-float4 velocityPass(VSOutput input) : SV_Target {
+float2 velocityPass(VSOutput input) : SV_Target {
 
     float2 uv = input.uv;
-    float2 velocity = fieldA.Sample(uv).xy * 2.0 - 1.0;
-    float2 prevUV = uv - dt * ( velocity  );
-    prevUV = clamp(prevUV, 0.0, 1.0);
+    float2 velocity = fieldA.Sample(uv).xy;
+    float2 prevUV = uv - dt * ( velocity  ) * texelSize;
 
-    float2 advected = (fieldA.Sample( prevUV).xy );
+    float2 advected = (fieldA.Sample(prevUV).xy);
 
-    return float4(advected, 0.0, 1.0);
+    return (advected);
 }
 
 [shader("fragment")]
 float4 densityPass(VSOutput input) : SV_Target {
 
     float2 uv = input.uv;
-    float2 velocity = fieldA.Sample(uv).xy * 2.0 - 1.0;
-    float2 prevUV = uv - dt * (velocity);
+    float2 velocity = fieldA.Sample(uv).xy;
+    float2 prevUV = uv - dt * (velocity)*texelSize;
     prevUV = clamp(prevUV, 0.0, 1.0);
 
-    float2 advected = (fieldA.Sample(prevUV).xy);
+    float2 advected = (fieldB.Sample(prevUV).xy);
 
     return float4(advected, 0.0, 1.0);
 }
 
-static const float texelX = 1.0 / 1920.0f;
-static const float texelY = 1.0 / 1200.0f;
-
 [shader("fragment")]
-float4 divergencePass(VSOutput input) : SV_Target {
-    float2 left = fieldA.Sample(input.uv - float2(texelX, 0.0)).xy;
+float divergencePass(VSOutput input) : SV_Target {
+    float2 left = fieldA.Sample(input.uv + float2(-texelX, 0.0)).xy;
     float2 right = fieldA.Sample(input.uv + float2(texelX, 0.0)).xy;
-    float2 down = fieldA.Sample(input.uv - float2(0.0, texelY)).xy;
+    float2 down = fieldA.Sample(input.uv + float2(0.0, -texelY)).xy;
     float2 up = fieldA.Sample(input.uv + float2(0.0, texelY)).xy;
 
-    float divX = (right.x - left.x);
+    float divX = (right.x - left.x) ;
     float divY = (up.y - down.y);
 
-    float divergence = 0.5 * (divX + divY);
+    float divergence = (divX + divY);
 
-    return float4( divergence, 0.0, 0.0, 0.0 );
+    return ( divergence);
 }
 
 [shader("fragment")]
-float4 pressurePass(VSOutput input) : SV_Target {
+float pressurePass(VSOutput input) : SV_Target {
 
     float2 uv = input.uv;
 
@@ -93,5 +92,24 @@ float4 pressurePass(VSOutput input) : SV_Target {
     float divergence = fieldB.Sample(uv).x;
     float pressure = (left + right + down + up - divergence) * 0.25;
 
-    return float4( pressure, 0.0, 0.0, 1.0);
+    return ( pressure);
+}
+
+[shader("fragment")]
+float2 projectionPass(VSOutput input) : SV_Target {
+
+    float2 uv = input.uv;
+
+    float pL = fieldA.Sample(uv - float2(texelX, 0.0)).x;
+    float pR = fieldA.Sample(uv + float2(texelX, 0.0)).x;
+    float pD = fieldA.Sample(uv - float2(0.0, texelY)).x;
+    float pU = fieldA.Sample(uv + float2(0.0, texelY)).x;
+
+    float2 gradP = float2(pR - pL, pU - pD) * 0.5;
+
+    float2 velocity = fieldB.Sample(uv).xy;
+
+    velocity -= gradP;
+
+    return (velocity);
 }

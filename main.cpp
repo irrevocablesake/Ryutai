@@ -483,6 +483,11 @@ class Renderer {
 			return lerp(x1, x2, v);
 		}
 
+		 struct float2 {
+			 float x;
+			 float y;
+		 };
+
 		std::vector<uint8_t> generatePerlinTexture(int width, int height, float scale)
 		{
 			std::vector<uint8_t> data(width * height * 4);
@@ -493,16 +498,13 @@ class Renderer {
 					float nx = x * scale;
 					float ny = y * scale;
 
-					float n = perlin(nx, ny);
-
-					n = 0.5f * (n + 1.0f);
-
-					uint8_t value = static_cast<uint8_t>(n * 255.0f);
+					float angle = perlin(nx, ny) * 6.28318f;
+					glm::vec2 vel = glm::vec2(cos(angle), sin(angle));
 
 					size_t idx = (static_cast<size_t>(y) * width + x) * 4;
-					data[idx + 0] = value; 
-					data[idx + 1] = 255 - value; 
-					data[idx + 2] = value; 
+					data[idx + 0] = (vel.x * 0.5f + 0.5f) * 255;
+					data[idx + 1] = (vel.y * 0.5f + 0.5f) * 255;
+					data[idx + 2] = 0.0; 
 					data[idx + 3] = 255;   
 				}
 			}
@@ -510,9 +512,39 @@ class Renderer {
 			return data;
 		}
 
-		void clearImageWithNoise( FieldState fieldState ) {
-			auto buffer = generatePerlinTexture(windowIF.surfaceCapabilities.currentExtent.width, windowIF.surfaceCapabilities.currentExtent.height, 0.01f);
-			uint32_t bufferSize = windowIF.surfaceCapabilities.currentExtent.width * windowIF.surfaceCapabilities.currentExtent.width * 4;
+		std::vector<float2> generatePerlinTexture(int width, int height, float scale, bool it )
+		{
+			std::vector<float2> data(width * height);
+
+			for (int y = 0; y < height; y++) {
+				for (int x = 0; x < width; x++) {
+
+					float nx = x * scale;
+					float ny = y * scale;
+
+					float angle = perlin(nx, ny) * 6.2831;
+					float2 velocity = float2(cos(angle) * 1, sin(angle) * 1);
+
+					size_t idx = y * width + x;
+					data[idx] = velocity;
+				}
+			}
+
+			return data;
+		}
+
+		void clearImageWithNoise( FieldState fieldState, bool velocityField ) {
+			std::vector<uint8_t> buffer;
+			std::vector<float2> buffer2;
+			uint32_t bufferSize;
+			if (!velocityField) {
+				buffer = generatePerlinTexture(windowIF.surfaceCapabilities.currentExtent.width, windowIF.surfaceCapabilities.currentExtent.height, 0.01f );
+				bufferSize = windowIF.surfaceCapabilities.currentExtent.width * windowIF.surfaceCapabilities.currentExtent.height * 4;
+			}
+			else {
+				buffer2 = generatePerlinTexture(windowIF.surfaceCapabilities.currentExtent.width, windowIF.surfaceCapabilities.currentExtent.height, 0.01f, false);
+				bufferSize = windowIF.surfaceCapabilities.currentExtent.width * windowIF.surfaceCapabilities.currentExtent.height * 8;
+			}
 			VkBuffer imageSourceBuffer{};
 			VmaAllocation imageSourceAllocation{};
 			VkBufferCreateInfo imageSourceBufferCreateInfo{
@@ -530,7 +562,12 @@ class Renderer {
 
 			void* imageSourceBufferPtr{ nullptr };
 			validateResult(vmaMapMemory(vmaAllocator, imageSourceAllocation, &imageSourceBufferPtr), "Failed to Map Memory for Staging Buffer of Image");
-			memcpy(imageSourceBufferPtr, buffer.data(), buffer.size());
+			if (velocityField) {
+				memcpy(imageSourceBufferPtr, buffer2.data(), buffer2.size());
+			}
+			else {
+				memcpy(imageSourceBufferPtr, buffer.data(), buffer.size());
+			}
 
 			VkFenceCreateInfo fenceOneTimeCreateInfo{
 				.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO
@@ -629,7 +666,7 @@ class Renderer {
 
 		}
 
-		FieldState generateField( VkClearColorValue clearValue, bool noise ) {
+		FieldState generateField( VkClearColorValue clearValue, bool noise, VkFormat imageFormat, bool isVelocityField = false ) {
 
 			FieldState fieldState{};
 
@@ -670,7 +707,7 @@ class Renderer {
 			validateResult(vkCreateImageView(deviceIF.logical.device, &textureImageViewCreateInfo, nullptr, &fieldState.imageView));
 
 			if ( noise) {
-				clearImageWithNoise( fieldState );
+				clearImageWithNoise( fieldState, isVelocityField );
 			}
 			else {
 				clearImage( fieldState, clearValue );
@@ -680,9 +717,11 @@ class Renderer {
 				.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
 				.magFilter = VK_FILTER_LINEAR,
 				.minFilter = VK_FILTER_LINEAR,
-				.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
-				.maxAnisotropy = 8.0f,
-				.maxLod = 1
+				.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST,
+				.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+				.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+				.anisotropyEnable = VK_FALSE,
+				.maxLod = 0.0f,
 			};
 
 			validateResult(vkCreateSampler(deviceIF.logical.device, &samplerCreateInfo, nullptr, &fieldState.sampler));
@@ -723,7 +762,7 @@ class Renderer {
 		}
 
 		void generateFields() {
-			uint32_t descriptorCount = 7;
+			uint32_t descriptorCount = 9;
 			VkDescriptorPoolSize poolSize{
 				.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
 				.descriptorCount = static_cast<uint32_t>(descriptorCount)
@@ -738,20 +777,186 @@ class Renderer {
 
 			validateResult(vkCreateDescriptorPool(deviceIF.logical.device, &descriptorPoolCreateInfo, nullptr, &descriptorPool));
 
-			velocityField.field[0] = generateField(VkClearColorValue{ 0.0, 0.0, 0.0 }, true);
-			velocityField.field[1] = generateField(VkClearColorValue{ 0.0, 0.0, 0.0 }, false);
+			velocityField.field[0] = generateField(VkClearColorValue{ 0.0, 0.0, 0.0 }, true, VK_FORMAT_R32G32_SFLOAT, true );
+			velocityField.field[1] = generateField(VkClearColorValue{ 0.0, 0.0, 0.0 }, false, VK_FORMAT_R32G32_SFLOAT);
 			updateDescriptors( velocityField );
 
-			densityField.field[0] = generateField(VkClearColorValue{ 0.0, 0.0, 0.0 }, true);
-			densityField.field[1] = generateField(VkClearColorValue{ 0.0, 0.0, 0.0 }, false);
-			updateDescriptors(densityField);
+			densityField.field[0] = generateField(VkClearColorValue{ 0.0, 0.0, 0.0 }, true, VK_FORMAT_R8G8B8A8_UNORM);
+			densityField.field[1] = generateField(VkClearColorValue{ 0.0, 0.0, 0.0 }, false, VK_FORMAT_R8G8B8A8_UNORM);
+			updateDescriptors(densityField, false, false, false);
 
-			divergenceField.field = generateField(VkClearColorValue{ 0.0, 0.0, 0.0 }, false);
+			divergenceField.field = generateField(VkClearColorValue{ 0.0, 0.0, 0.0 }, false, VK_FORMAT_R32_SFLOAT);
 			updateDescriptors(divergenceField);
 
-			pressureField.field[0] = generateField(VkClearColorValue{ 0.0, 0.0, 0.0 }, false);
-			pressureField.field[1] = generateField(VkClearColorValue{ 0.0, 0.0, 0.0 }, false);
+			pressureField.field[0] = generateField(VkClearColorValue{ 0.0, 0.0, 0.0 }, false, VK_FORMAT_R32_SFLOAT);
+			pressureField.field[1] = generateField(VkClearColorValue{ 0.0, 0.0, 0.0 }, false, VK_FORMAT_R32_SFLOAT);
 			updateDescriptors(pressureField, false );
+
+			projectionField.field[0] = generateField(VkClearColorValue{ 0.0, 0.0, 0.0 }, false, VK_FORMAT_R32G32_SFLOAT);
+			projectionField.field[1] = generateField(VkClearColorValue{ 0.0, 0.0, 0.0 }, false, VK_FORMAT_R32G32_SFLOAT);
+			updateDescriptors(projectionField, false, false);
+		}
+
+		void updateDescriptors(PingPongField& field, bool item, bool it, bool k) {
+			VkDescriptorSetLayoutBinding binding0{
+				.binding = 0,
+				.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+				.descriptorCount = 1,
+				.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT
+			};
+
+			VkDescriptorSetLayoutBinding binding1{
+				.binding = 1,
+				.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+				.descriptorCount = 1,
+				.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT
+			};
+
+			std::vector< VkDescriptorSetLayoutBinding > binding;
+			binding.push_back(binding0);
+			binding.push_back(binding1);
+
+			VkDescriptorSetLayoutCreateInfo descriptorLayoutCreateInfo{
+				.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+				.bindingCount = 2,
+				.pBindings = binding.data()
+			};
+
+			validateResult(vkCreateDescriptorSetLayout(deviceIF.logical.device, &descriptorLayoutCreateInfo, nullptr, &field.descriptorLayout));
+
+			std::vector< VkDescriptorSetLayout > layouts(2, field.descriptorLayout);
+			VkDescriptorSetAllocateInfo descriptorAllocateInfo{
+				.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+				.descriptorPool = descriptorPool,
+				.descriptorSetCount = 2,
+				.pSetLayouts = layouts.data()
+			};
+
+			validateResult(vkAllocateDescriptorSets(deviceIF.logical.device, &descriptorAllocateInfo, field.descriptors.data()));
+
+			std::vector< VkWriteDescriptorSet > writeDescriptorSet;
+			VkWriteDescriptorSet writeDesriptorSet00{
+				.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+				.dstSet = field.descriptors[0],
+				.dstBinding = 0,
+				.descriptorCount = 1,
+				.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+				.pImageInfo = &velocityField.field[0].descriptor
+			};
+
+			VkWriteDescriptorSet writeDesriptorSet01{
+				.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+				.dstSet = field.descriptors[0],
+				.dstBinding = 1,
+				.descriptorCount = 1,
+				.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+				.pImageInfo = &densityField.field[0].descriptor
+			};
+
+			VkWriteDescriptorSet writeDesriptorSet10{
+				.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+				.dstSet = field.descriptors[1],
+				.dstBinding = 0,
+				.descriptorCount = 1,
+				.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+				.pImageInfo = &velocityField.field[1].descriptor
+			};
+
+			VkWriteDescriptorSet writeDesriptorSet11{
+				.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+				.dstSet = field.descriptors[1],
+				.dstBinding = 1,
+				.descriptorCount = 1,
+				.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+				.pImageInfo = &densityField.field[1].descriptor
+			};
+
+			writeDescriptorSet.push_back(writeDesriptorSet00);
+			writeDescriptorSet.push_back(writeDesriptorSet01);
+			writeDescriptorSet.push_back(writeDesriptorSet11);
+			writeDescriptorSet.push_back(writeDesriptorSet10);
+			vkUpdateDescriptorSets(deviceIF.logical.device, 4, writeDescriptorSet.data(), 0, nullptr);
+		}
+
+		void updateDescriptors(PingPongField& field, bool item, bool it) {
+			VkDescriptorSetLayoutBinding binding0{
+				.binding = 0,
+				.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+				.descriptorCount = 1,
+				.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT
+			};
+
+			VkDescriptorSetLayoutBinding binding1{
+				.binding = 1,
+				.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+				.descriptorCount = 1,
+				.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT
+			};
+
+			std::vector< VkDescriptorSetLayoutBinding > binding;
+			binding.push_back(binding0);
+			binding.push_back(binding1);
+
+			VkDescriptorSetLayoutCreateInfo descriptorLayoutCreateInfo{
+				.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+				.bindingCount = 2,
+				.pBindings = binding.data()
+			};
+
+			validateResult(vkCreateDescriptorSetLayout(deviceIF.logical.device, &descriptorLayoutCreateInfo, nullptr, &field.descriptorLayout));
+
+			std::vector< VkDescriptorSetLayout > layouts(2, field.descriptorLayout);
+			VkDescriptorSetAllocateInfo descriptorAllocateInfo{
+				.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+				.descriptorPool = descriptorPool,
+				.descriptorSetCount = 2,
+				.pSetLayouts = layouts.data()
+			};
+
+			validateResult(vkAllocateDescriptorSets(deviceIF.logical.device, &descriptorAllocateInfo, field.descriptors.data()));
+
+			std::vector< VkWriteDescriptorSet > writeDescriptorSet;
+			VkWriteDescriptorSet writeDesriptorSet00{
+				.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+				.dstSet = field.descriptors[0],
+				.dstBinding = 0,
+				.descriptorCount = 1,
+				.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+				.pImageInfo = &pressureField.field[0].descriptor
+			};
+
+			VkWriteDescriptorSet writeDesriptorSet01{
+				.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+				.dstSet = field.descriptors[0],
+				.dstBinding = 1,
+				.descriptorCount = 1,
+				.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+				.pImageInfo = &velocityField.field[0].descriptor
+			};
+
+			VkWriteDescriptorSet writeDesriptorSet10{
+				.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+				.dstSet = field.descriptors[1],
+				.dstBinding = 0,
+				.descriptorCount = 1,
+				.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+				.pImageInfo = &pressureField.field[1].descriptor
+			};
+
+			VkWriteDescriptorSet writeDesriptorSet11{
+				.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+				.dstSet = field.descriptors[1],
+				.dstBinding = 1,
+				.descriptorCount = 1,
+				.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+				.pImageInfo = &velocityField.field[1].descriptor
+			};
+
+			writeDescriptorSet.push_back(writeDesriptorSet00);
+			writeDescriptorSet.push_back(writeDesriptorSet01);
+			writeDescriptorSet.push_back(writeDesriptorSet11);
+			writeDescriptorSet.push_back(writeDesriptorSet10);
+			vkUpdateDescriptorSets(deviceIF.logical.device, 4, writeDescriptorSet.data(), 0, nullptr);
 		}
 
 		void updateDescriptors(PingPongField& field, bool item ) {
@@ -807,7 +1012,7 @@ class Renderer {
 				.dstBinding = 1,
 				.descriptorCount = 1,
 				.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-				.pImageInfo = &field.field[0].descriptor
+				.pImageInfo = &divergenceField.field.descriptor
 			};
 
 			VkWriteDescriptorSet writeDesriptorSet10{
@@ -825,7 +1030,7 @@ class Renderer {
 				.dstBinding = 1,
 				.descriptorCount = 1,
 				.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-				.pImageInfo = &field.field[1].descriptor
+				.pImageInfo = &divergenceField.field.descriptor
 			};
 
 			writeDescriptorSet.push_back(writeDesriptorSet00);
@@ -1113,6 +1318,30 @@ class Renderer {
 				}
 			};
 			createPipeline(pressureField.pipeline, pressureShaderStages, pressureField.descriptorLayout, pressureField.pipelineLayout);
+
+			VkPipelineLayoutCreateInfo projectionPipelineLayoutCreateInfo{
+				.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+				.setLayoutCount = 1,
+				.pSetLayouts = &projectionField.descriptorLayout
+			};
+
+			validateResult(vkCreatePipelineLayout(deviceIF.logical.device, &projectionPipelineLayoutCreateInfo, nullptr, &projectionField.pipelineLayout));
+
+			std::vector< VkPipelineShaderStageCreateInfo > projectionShaderStages{
+				{
+					.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+					.stage = VK_SHADER_STAGE_VERTEX_BIT,
+					.module = shaderModule,
+					.pName = "main"
+				},
+				{
+					.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+					.stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+					.module = shaderModule,
+					.pName = "projectionPass"
+				}
+			};
+			createPipeline(projectionField.pipeline, projectionShaderStages, projectionField.descriptorLayout, projectionField.pipelineLayout);
 		}
 
 		void recreateSwapchain() {
@@ -1178,6 +1407,31 @@ class Renderer {
 					.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 					.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
 					.image = deviceIF.logical.swapchainConfiguration.swapchainImages[imageIndex],
+					.subresourceRange{
+						.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+						.levelCount = 1,
+						.layerCount = 1
+					}
+			};
+
+			VkDependencyInfo barrierPresentDependencyInfo12{
+				.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+				.imageMemoryBarrierCount = 1,
+				.pImageMemoryBarriers = &barrierPresent
+			};
+			vkCmdPipelineBarrier2(commandBuffer, &barrierPresentDependencyInfo12);
+		}
+
+		void transitionFromGetWriteToRead(VkCommandBuffer& commandBuffer, VkImage &image) {
+			VkImageMemoryBarrier2 barrierPresent{
+					.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+					.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+					.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+					.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+					.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+					.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+					.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+					.image = image,
 					.subresourceRange{
 						.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
 						.levelCount = 1,
@@ -1287,6 +1541,30 @@ class Renderer {
 				.dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT,
 				.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
 				.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+				.image = image,
+				.subresourceRange{
+					.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+					.levelCount = 1,
+					.layerCount = 1
+				}
+			};
+			VkDependencyInfo transitionAttachmentFromWriteToReadDependencyInfo{
+				.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+				.imageMemoryBarrierCount = 1,
+				.pImageMemoryBarriers = &transitionAttachmentFromWriteToRead
+			};
+			vkCmdPipelineBarrier2(commandBuffer, &transitionAttachmentFromWriteToReadDependencyInfo);
+		}
+
+		void transitionFromReadToGetWrite(VkCommandBuffer& commandBuffer, VkImage& image) {
+			VkImageMemoryBarrier2 transitionAttachmentFromWriteToRead{
+				.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+				.srcStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+				.srcAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+				.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+				.dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+				.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+				.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 				.image = image,
 				.subresourceRange{
 					.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -1480,12 +1758,12 @@ class Renderer {
 				vkCmdEndRendering(commandBuffer);
 				transitionFromAttachToRead(commandBuffer, divergenceField.field.image);
 
-				const int iterations = 40;
+				const int iterations = 20;
 				uint32_t pressureRead = 0;
 				uint32_t pressureWrite = 1;
 
-				for (int i = 0; i < iterations; i++){
-					transitionFromReadToAttach(commandBuffer, pressureField.field[pressureWrite].image );
+				for (int i = 0; i < iterations; i++) {
+					transitionFromReadToAttach(commandBuffer, pressureField.field[pressureWrite].image);
 					renderingAttachment = getRenderingInfo(pressureField.field[pressureWrite].imageView);
 					vkCmdBeginRendering(commandBuffer, &renderingAttachment.renderingInfo);
 					vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pressureField.pipeline);
@@ -1497,10 +1775,74 @@ class Renderer {
 					std::swap(pressureRead, pressureWrite);
 				}
 
-				transitionFromReadToCopyRead( commandBuffer, pressureField.field[pressureRead].image);
+				transitionFromReadToAttach(commandBuffer, projectionField.field[writeIndex].image);
+				renderingAttachment = getRenderingInfo(projectionField.field[writeIndex].imageView);
+				vkCmdBeginRendering(commandBuffer, &renderingAttachment.renderingInfo);
+				vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, projectionField.pipeline);
+				vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, projectionField.pipelineLayout, 0, 1, &projectionField.descriptors[pressureRead], 0, nullptr);
+				vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+				vkCmdEndRendering(commandBuffer);
+				transitionFromAttachToRead(commandBuffer, projectionField.field[writeIndex].image);
+
+				transitionFromReadToCopyRead(commandBuffer, projectionField.field[writeIndex].image);
+				transitionFromReadToGetWrite(commandBuffer, velocityField.field[writeIndex].image);
+				copyImageFromTo(commandBuffer, projectionField.field[writeIndex].image, velocityField.field[writeIndex].image);
+				transitionFromCopyReadToRead(commandBuffer, projectionField.field[writeIndex].image);
+				transitionFromGetWriteToRead(commandBuffer, velocityField.field[writeIndex].image);
+
+				VkDescriptorImageInfo imgInfo0{};
+				imgInfo0.sampler = velocityField.field[writeIndex].sampler;
+				imgInfo0.imageView = velocityField.field[writeIndex].imageView;
+				imgInfo0.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+				VkWriteDescriptorSet write0{};
+				write0.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+				write0.dstSet = densityField.descriptors[readIndex];
+				write0.dstBinding = 1;
+				write0.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+				write0.descriptorCount = 1;
+				write0.pImageInfo = &imgInfo0;
+
+				VkDescriptorImageInfo imgInfo1{};
+				imgInfo1.sampler = densityField.field[readIndex].sampler;
+
+				imgInfo1.imageView = densityField.field[readIndex].imageView;
+				imgInfo1.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+				VkWriteDescriptorSet write1{};
+				write1.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+				write1.dstSet = densityField.descriptors[readIndex];
+				write1.dstBinding = 0;
+				write1.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+				write1.descriptorCount = 1;
+				write1.pImageInfo = &imgInfo1;
+
+				std::vector< VkWriteDescriptorSet > writeSets;
+				writeSets.push_back(write0);
+				writeSets.push_back(write1);
+
+				vkUpdateDescriptorSets(
+					deviceIF.logical.device,
+					2,
+					writeSets.data(),
+					0,
+					nullptr
+				);
+
+
+				transitionFromReadToAttach(commandBuffer, densityField.field[writeIndex].image);
+				renderingAttachment = getRenderingInfo(densityField.field[writeIndex].imageView);
+				vkCmdBeginRendering(commandBuffer, &renderingAttachment.renderingInfo);
+				vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, densityField.pipeline);
+				vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, densityField.pipelineLayout, 0, 1, &densityField.descriptors[readIndex], 0, nullptr);
+				vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+				vkCmdEndRendering(commandBuffer);
+				transitionFromAttachToRead(commandBuffer, densityField.field[writeIndex].image);
+
+				transitionFromReadToCopyRead( commandBuffer, densityField.field[writeIndex].image);
 				transitionSwapchainImageUndefinedToGetWrite(commandBuffer);
-				copyImageFromTo(commandBuffer, pressureField.field[pressureRead].image, deviceIF.logical.swapchainConfiguration.swapchainImages[imageIndex]);
-				transitionFromCopyReadToRead(commandBuffer, pressureField.field[pressureRead].image);
+				copyImageFromTo(commandBuffer, densityField.field[writeIndex].image, deviceIF.logical.swapchainConfiguration.swapchainImages[imageIndex]);
+				transitionFromCopyReadToRead(commandBuffer, densityField.field[writeIndex].image);
 				transitionSwapchainImageGetWriteToPresent(commandBuffer);
 
 				vkEndCommandBuffer(commandBuffer);
@@ -1538,7 +1880,7 @@ class Renderer {
 				/*vkQueueWaitIdle( deviceIF.queue.queue );
 				vkDeviceWaitIdle(deviceIF.logical.device);*/
 
-				//SDL_Delay(200);
+				SDL_Delay(50);
 			}
 		}
 
@@ -1634,7 +1976,7 @@ class Renderer {
 					bool updateSwapchain{ false };
 					uint32_t imageCount;
 
-					static constexpr uint32_t maxFramesInFlight{ 2 };
+					static constexpr uint32_t maxFramesInFlight{ 1 };
 					std::array< VkFence, maxFramesInFlight > fences;
 					std::array< VkSemaphore, maxFramesInFlight > presentSemaphore;
 					std::vector< VkSemaphore > renderSemaphore;
@@ -1653,8 +1995,6 @@ class Renderer {
 		VkDescriptorSetLayout descriptorSetLayoutDivergence;
 		VkDescriptorSet divergenceDescriptorSet;
 
-		VkPipeline pressurePipeline;
-
 		int frameIndex = 0;
 		uint32_t imageIndex = 0;
 		int simulationIndex = 0;
@@ -1668,7 +2008,7 @@ class Renderer {
 			VkDescriptorSetLayout descriptorLayout;
 			std::array< VkDescriptorSet,2 > descriptors;
 			std::array<FieldState, 2> field;
-		} velocityField, densityField, pressureField;
+		} velocityField, densityField, pressureField, projectionField;
 
 		//Normal Scheme
 		struct NormalField {
