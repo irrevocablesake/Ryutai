@@ -26,6 +26,15 @@ Fluids are everywhere, water, honey, air, well anything that flows falls in that
 
 So far with the progress, we start with a velocity field initialized Perlin Noise, using this velocity field we transport the density field. In between there are multiple passes to simulate proper flow of fluids with respect to laws of physics, since this is WIP - the physics is wonky but constant tweaks are being made so it becomes a better simulation.
 
+# Simulation
+
+
+https://github.com/user-attachments/assets/7a25223a-779c-4859-8049-021a4541ed51
+
+
+
+
+
 ## Resources
 - [ Fluid Dynamics NVIDIA ](https://developer.nvidia.com/gpugems/gpugems/part-vi-beyond-triangles/chapter-38-fast-fluid-dynamics-simulation-gpu)
 - [ Fluid Simulation for Dummies ]( https://www.mikeash.com/pyblog/fluid-simulation-for-dummies.html )
