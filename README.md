@@ -25,7 +25,7 @@ So far with the progress, we start with a velocity field initialized using Perli
 # Simulation
 Here is a video of how the simulation would proceed from an initial state to a few seconds into the simulation
 
-https://github.com/user-attachments/assets/7a25223a-779c-4859-8049-021a4541ed51
+https://github.com/user-attachments/assets/a475feb6-10c5-4e8b-bf70-4d85156f5068
 
 ## Resources
 - [ Fluid Dynamics NVIDIA ](https://developer.nvidia.com/gpugems/gpugems/part-vi-beyond-triangles/chapter-38-fast-fluid-dynamics-simulation-gpu)
