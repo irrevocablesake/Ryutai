@@ -36,7 +36,9 @@ The rest of the algorithm works to make sure the velocity field is computed acco
 - The first thing after splats have been introduced is to find these "bad areas"
 - Once we have those bad areas, we need to compute a pressure that would counteract these "bad areas", which makes the simulation "incompressible"
 - We fix the velocity using the pressure, and now we have a stable velocity field again
-- The most important thing a fluid does is, and that's the reason for it's mere existance: it flows. We now use our stable veloi
+- The most important thing a fluid does is, and that's the reason for it's mere existance: it flows. We now use our stable velocity to do two things: flow velocity itself and whatever is present in the fluid ( dye )
+- We also ensure to dampen the flow, so eventually as the simulation keeps running, the flow looses energy and comes to standstill ( at that point we just kill the dye )
+- We update all the fields to hold the latest outputs, we pass these outputs to next frames, and thus the algorithm keeps simulating.
 
 So far with the progress, we start with a velocity field initialized using Perlin Noise, with this velocity field we transport the density field. In between there are multiple passes to simulate proper flow of fluids with respect to laws of physics, since this is WIP - the physics is wonky but constant tweaks are being made so it becomes a better simulation.
 
