@@ -28,9 +28,11 @@ At the highest level we can think of this simulation made up of two things:
 -  Velocity Field: A field that tells you where the fluid is flowing
 -  Dye Field: A field that tells you if the fluid flows something in it, this is like dropping paint drops in a bucket of water, it gives us the ability to visualize the flow properly.
 
-The rest of the algorithm works to make sure the velocity field is computed according to the equations, hence keeping it true to Physics. A general flow of the program can be thought as follows:
+The rest of the algorithm works to make sure the velocity field is computed according to the equations, hence keeping it true to Physics. 
+
+A general flow of the program can be thought as follows:
 -  We start with a zero velocity field and a zero dye field ( no flow & no color)
--  We introduce a few "splats" these disturb these fields:
+-  We introduce a few "splats" that disturb these fields:
   - eg. A splat is made up of radius, color and location, we send this information to the velocity field and dye field, they accordingly make a note of this splat
   - Velocity field reads the color component as force
   - Dye Field, reads the color and stores it
