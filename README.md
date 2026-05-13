@@ -4,14 +4,8 @@
 <table>
   <tbody>
     <tr>
-      <td >
-        <img src="https://raw.githubusercontent.com/irrevocablesake/Ryutai/refs/heads/master/images/Initial.png" width="100%">
-        <p style="text-align: center; font-style: italic; font-size: 14px; color: #555;">
-          Simulation - Initial
-        </p>
-      </td>
       <td>
-        <img src="https://raw.githubusercontent.com/irrevocablesake/Ryutai/refs/heads/master/images/Later.png" width="100%">
+        <img src="https://raw.githubusercontent.com/irrevocablesake/Ryutai/refs/heads/master/images/repo-banner.png" width="100%">
         <p style="text-align: center; font-style: italic; font-size: 14px; color: #555;">
           Simulation - Elapsed
         </p>
