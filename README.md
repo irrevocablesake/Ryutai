@@ -22,29 +22,27 @@ Fluids are everywhere, water, honey, air, well anything that flows falls in that
 
 The equations look very complicated at a first glance, but - [ Fluid Dynamics NVIDIA ](https://developer.nvidia.com/gpugems/gpugems/part-vi-beyond-triangles/chapter-38-fast-fluid-dynamics-simulation-gpu) does a great job at breaking the equations down to chewable bites. Well, I said chewable not digestable haha, it helped me atleast understand what's happening within the simulation overall.
 
-The idea is quite simple: Fluids flow, what do they flow? They flow things that are present in them, and more importantly - they flow themselves too. 
+**The idea** is quite simple: **Fluids flow**, what do they flow? They flow things that are present in them, and more importantly - they flow themselves too. 
 
-At the highest level we can think of this simulation made up of two things:
--  Velocity Field: A field that tells you where the fluid is flowing.
--  Dye Field: A field that tells you if the fluid flows something in it, this is like dropping paint drops in a bucket of water, it gives us the ability to visualize the flow properly.
+At the highest level, this simulation is made up of two things:
+-  **Velocity Field:** A field that tells you **where** the fluid is flowing.
+-  **Dye Field:** A field that tells you if the fluid flows something in it, this is like dropping paint drops in a bucket of water, it gives us the ability to **visualize** the flow properly.
 
-The rest of the algorithm works to make sure the velocity field is computed according to the equations, hence keeping it true to Physics. 
+The rest of the **algorithm** works to make sure the velocity field is **computed** according to the **equations**, hence keeping it true to Physics. 
 
 A general flow of the program can be thought as follows:
--  We start with a zero velocity field and a zero dye field ( no flow & no color)
--  We introduce a few "splats" that disturb these fields:
+-  We start with a **zero velocity field** and a **zero dye** field ( no flow & no color)
+-  We introduce a few "**splats**" that disturb these fields:
     - A splat is made up of radius, color and location, we send this information to the velocity field and dye field, they accordingly make a note of this splat
-      - Velocity field reads the color component as force
-      - Dye Field, reads the color and stores it
-- But this "disturbing" of fluid due to splats, causes the velocity field to have some "bad areas", areas, that compress or expand, that wouldn't respect physics.
-- We try to find these "bad areas" using something called as "divergence"
-- Once we have those bad areas, we need to compute a pressure field that would counteract these "bad areas", which makes the simulation "incompressible"
-- We fix the velocity using the pressure, and now we have a stable velocity field again
-- The most important thing a fluid does is, and that's the reason for it's mere existance: it flows. We now use our stable velocity to do two things: flow velocity itself and whatever is present in the fluid ( dye )
-- We also ensure to dampen the flow, so eventually as the simulation keeps running, the flow looses energy and comes to standstill ( at that point we just kill the dye )
+      - Velocity field reads the color component as **force**
+      - Dye Field, reads the color and **stores it**
+- But this "**disturbing**" of fluid due to splats, causes the velocity field to have some "**bad areas**", areas, that compress or expand, that wouldn't respect physics.
+- We try to **find** these "**bad areas**" using something called as "**divergence**"
+- Once we have those bad areas, we need to compute a **pressure field** that would **counteract** these "bad areas", which makes the simulation "**incompressible**"
+- We **fix** the velocity using the pressure, and now we have a stable velocity field again
+- The most important thing a fluid does is, and that's the reason for it's mere existance: it flows. We now use our stable velocity to do two things: **flow velocity itself** and whatever is present in the fluid ( dye )
+- We also ensure to **dampen** the flow, so eventually as the simulation keeps running, the flow **looses energy** and comes to standstill ( at that point we just kill the dye ). If we don't do this, the flow will never stop and will keep the energy constant.
 - We update all the fields to hold the latest outputs, we pass these outputs to next frames, and thus the algorithm keeps simulating.
-
-So far with the progress, we start with a velocity field initialized using Perlin Noise, with this velocity field we transport the density field. In between there are multiple passes to simulate proper flow of fluids with respect to laws of physics, since this is WIP - the physics is wonky but constant tweaks are being made so it becomes a better simulation.
 
 # Simulation
 Here is a video of how the simulation would proceed from an initial state to a few seconds into the simulation
