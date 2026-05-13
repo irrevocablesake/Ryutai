@@ -39,12 +39,13 @@ A general flow of the program can be thought as follows:
       - Velocity field reads the color component as **force**
       - Dye Field, reads the color and **stores it**
 - This "**disturbing**" of fluid due to splats, causes the velocity field to have some "**bad areas**", areas that compress or expand and that wouldn't respect physics.
-- We try to **find** these "**bad areas**" using something called as "**divergence**"
-- Once we have those bad areas, we need to compute a **pressure field** that would **counteract** these "bad areas", which makes the simulation "**incompressible**"
-- We **fix** the velocity using the pressure, and now we have a stable velocity field again
-- The most important thing a fluid does is, and that's the reason for it's mere existance: it flows. We now use our stable velocity to do two things: **flow velocity itself** and whatever is present in the fluid ( dye )
+- We try to **find** these "**bad areas**" using something called as "**divergence**".
+- Next, we need to compute a **pressure field** that would **counteract** these "bad areas", which makes the simulation "**incompressible**".
+- The velocity field is **fixed** using the pressure field, the result is a stable velocity field.
+- The most important thing a fluid does is, and that's the reason for it's mere existance: it flows. We now use our stable velocity to do two things: **flow velocity itself** and whatever is present in the fluid ( **dye** )
 - We also ensure to **dampen** the flow, so eventually as the simulation keeps running, the flow **looses energy** and comes to standstill ( at that point we just kill the dye ). If we don't do this, the flow will never stop and will keep the energy constant.
-- We update all the fields to hold the latest outputs, we pass these outputs to next frames, and thus the algorithm keeps simulating.
+  
+The above algorithm is the soul of the simulation, and that's what gives us the beautiful renders of fluids.
 
 # Simulation
 Here is a video of how the simulation would proceed from an initial state to a few seconds into the simulation
