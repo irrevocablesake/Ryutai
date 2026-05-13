@@ -38,7 +38,7 @@ A general flow of the program can be thought as follows:
     - A splat is made up of radius, color and location, we send this information to the velocity field and dye field, they accordingly make a note of this splat
       - Velocity field reads the color component as **force**
       - Dye Field, reads the color and **stores it**
-- This "**disturbing**" of fluid due to splats, causes the velocity field to have some "**bad areas**", areas, that compress or expand, that wouldn't respect physics.
+- This "**disturbing**" of fluid due to splats, causes the velocity field to have some "**bad areas**", areas that compress or expand, that wouldn't respect physics.
 - We try to **find** these "**bad areas**" using something called as "**divergence**"
 - Once we have those bad areas, we need to compute a **pressure field** that would **counteract** these "bad areas", which makes the simulation "**incompressible**"
 - We **fix** the velocity using the pressure, and now we have a stable velocity field again
