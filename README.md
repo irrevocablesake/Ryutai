@@ -20,12 +20,12 @@ Ryutai - Japanese word for "fluid"
 
 Fluids are everywhere, water, honey, air, well anything that flows falls in that category. The goal was to implement a **2D Fluid** Simulation using **C++** and **Vulkan**, and later expand it into **3D Fluid** Simulation all based on **Jos Stam Real-Time Fluid Dynamics** Technique, which itself uses Navier Stokes Incompressible Fluid Equations. 
 
-The equations look very complicated at a first glance, but - [ Fluid Dynamics NVIDIA ](https://developer.nvidia.com/gpugems/gpugems/part-vi-beyond-triangles/chapter-38-fast-fluid-dynamics-simulation-gpu) does a great job at breaking the equations down to chewable bites. Well, I said chewable not digestable haha, it helped me atleast understand what's happening overall within the simulation
+The equations look very complicated at a first glance, but - [ Fluid Dynamics NVIDIA ](https://developer.nvidia.com/gpugems/gpugems/part-vi-beyond-triangles/chapter-38-fast-fluid-dynamics-simulation-gpu) does a great job at breaking the equations down to chewable bites. Well, I said chewable not digestable haha, it helped me atleast understand what's happening within the simulation overall.
 
 The idea is quite simple: Fluids flow, what do they flow? They flow things that are present in them, and more importantly - they flow themselves too. 
 
 At the highest level we can think of this simulation made up of two things:
--  Velocity Field: A field that tells you where the fluid is flowing
+-  Velocity Field: A field that tells you where the fluid is flowing.
 -  Dye Field: A field that tells you if the fluid flows something in it, this is like dropping paint drops in a bucket of water, it gives us the ability to visualize the flow properly.
 
 The rest of the algorithm works to make sure the velocity field is computed according to the equations, hence keeping it true to Physics. 
