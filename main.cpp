@@ -23,6 +23,10 @@
 class Renderer {
 
 public:
+	struct FieldState;
+	struct PingPongField;
+	struct NormalField;
+
 	//validation functions
 	void validateResult(VkResult result, std::string message = "ERROR!") {
 		if (result != VK_SUCCESS) {
@@ -143,7 +147,7 @@ public:
 
 		VkPhysicalDeviceVulkan11Features enabledVk11Features{
 			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
-			.shaderDrawParameters = VK_TRUE
+			.shaderDrawParameters = VK_TRUE,
 		};
 
 		VkPhysicalDeviceVulkan13Features enabledVk13Features{
@@ -210,7 +214,7 @@ public:
 				.height = windowIF.surfaceCapabilities.currentExtent.height
 			},
 			.imageArrayLayers = 1,
-			.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+			.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
 			.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
 			.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
 			.presentMode = VK_PRESENT_MODE_FIFO_KHR
@@ -335,11 +339,12 @@ public:
 
 	}
 
-	void setupPipeline() {
+	void createPipeline(VkPipeline& pipeline, std::vector< VkPipelineShaderStageCreateInfo >& shaderStages, std::vector<VkDescriptorSetLayout> &layout, VkPipelineLayout& pipelineLayout, VkFormat format, VkColorComponentFlags flags ) {
+
 		VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo{
 			.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-			.setLayoutCount = 0,
-			.pSetLayouts = nullptr
+			.setLayoutCount = static_cast<uint32_t>(layout.size()),
+			.pSetLayouts = layout.data()
 		};
 
 		validateResult(vkCreatePipelineLayout(deviceIF.logical.device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayout));
@@ -355,21 +360,6 @@ public:
 		VkPipelineInputAssemblyStateCreateInfo inputAssemblyState{
 			.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
 			.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
-		};
-
-		std::vector< VkPipelineShaderStageCreateInfo > shaderStages{
-			{
-				.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-				.stage = VK_SHADER_STAGE_VERTEX_BIT,
-				.module = shaderModule,
-				.pName = "main"
-			},
-			{
-				.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-				.stage = VK_SHADER_STAGE_FRAGMENT_BIT,
-				.module = shaderModule,
-				.pName = "main"
-			}
 		};
 
 		std::vector< VkDynamicState > dynamicStates{
@@ -398,12 +388,13 @@ public:
 		VkPipelineRenderingCreateInfo renderingCreateInfo{
 			.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
 			.colorAttachmentCount = 1,
-			.pColorAttachmentFormats = &deviceIF.logical.swapchainConfiguration.imageFormat,
+			.pColorAttachmentFormats = &format,
 		};
 
 		VkPipelineColorBlendAttachmentState blendAttachment{
-			.colorWriteMask = 0xF
+			.colorWriteMask = flags
 		};
+
 
 		VkPipelineColorBlendStateCreateInfo colorBlendState{
 			.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
@@ -442,6 +433,203 @@ public:
 		validateResult(vkCreateGraphicsPipelines(deviceIF.logical.device, nullptr, 1, &pipelineCreateInfo, nullptr, &pipeline));
 	}
 
+	void setupPipeline() {
+		std::vector<VkDescriptorSetLayout> velocitySplatLayout;
+		velocitySplatLayout.push_back(descriptorLayouts[0]);
+
+		VkPipelineLayoutCreateInfo velocitySplatPipelineCreateInfo{
+			.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+			.setLayoutCount = static_cast< uint32_t >(velocitySplatLayout.size()),
+			.pSetLayouts = velocitySplatLayout.data()
+		};
+
+		validateResult(vkCreatePipelineLayout(deviceIF.logical.device, &velocitySplatPipelineCreateInfo, nullptr, &velocitySplatPipeline.pipelineLayout));
+
+		std::vector< VkPipelineShaderStageCreateInfo > velocitySplatShaderStages{
+			{
+				.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+				.stage = VK_SHADER_STAGE_VERTEX_BIT,
+				.module = shaderModule,
+				.pName = "main"
+			},
+			{
+				.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+				.stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+				.module = shaderModule,
+				.pName = "splatShader"
+			}
+		};
+		createPipeline(velocitySplatPipeline.pipeline, velocitySplatShaderStages, velocitySplatLayout, velocitySplatPipeline.pipelineLayout, VK_FORMAT_R16G16_SFLOAT, VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT);
+	
+		std::vector<VkDescriptorSetLayout> dyeSplatLayout;
+		dyeSplatLayout.push_back(descriptorLayouts[0]);
+
+		VkPipelineLayoutCreateInfo dyeSplatPipelineCreateInfo{
+			.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+			.setLayoutCount = static_cast< uint32_t >( dyeSplatLayout.size() ),
+			.pSetLayouts = dyeSplatLayout.data()
+		};
+
+		validateResult(vkCreatePipelineLayout(deviceIF.logical.device, &dyeSplatPipelineCreateInfo, nullptr, &dyeSplatPipeline.pipelineLayout));
+
+		std::vector< VkPipelineShaderStageCreateInfo > dyeSplatShaderStages{
+			{
+				.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+				.stage = VK_SHADER_STAGE_VERTEX_BIT,
+				.module = shaderModule,
+				.pName = "main"
+			},
+			{
+				.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+				.stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+				.module = shaderModule,
+				.pName = "splatShader"
+			}
+		};
+		createPipeline(dyeSplatPipeline.pipeline, dyeSplatShaderStages, dyeSplatLayout, dyeSplatPipeline.pipelineLayout, VK_FORMAT_R16G16B16A16_SFLOAT, VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT);
+
+		std::vector<VkDescriptorSetLayout> diverganceLayout;
+		diverganceLayout.push_back(descriptorLayouts[0]);
+
+		VkPipelineLayoutCreateInfo divergancePipelineCreateInfo{
+			.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+			.setLayoutCount = static_cast< uint32_t >(diverganceLayout.size() ),
+			.pSetLayouts = diverganceLayout.data()
+		};
+
+		validateResult(vkCreatePipelineLayout(deviceIF.logical.device, &divergancePipelineCreateInfo, nullptr, &divergancePipeline.pipelineLayout));
+
+		std::vector< VkPipelineShaderStageCreateInfo > diverganceShaderStages{
+			{
+				.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+				.stage = VK_SHADER_STAGE_VERTEX_BIT,
+				.module = shaderModule,
+				.pName = "main"
+			},
+			{
+				.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+				.stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+				.module = shaderModule,
+				.pName = "diverganceShader"
+			}
+		};
+		createPipeline(divergancePipeline.pipeline, diverganceShaderStages, diverganceLayout, divergancePipeline.pipelineLayout, VK_FORMAT_R16_SFLOAT, VK_COLOR_COMPONENT_R_BIT );
+
+
+		std::vector<VkDescriptorSetLayout> pressureLayout;
+		pressureLayout.push_back(descriptorLayouts[0]);
+		pressureLayout.push_back(descriptorLayouts[0]);
+
+		VkPipelineLayoutCreateInfo pressurePipelineCreateInfo{
+			.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+			.setLayoutCount = static_cast< uint32_t >( pressureLayout.size()),
+			.pSetLayouts = pressureLayout.data()
+		};
+
+		validateResult(vkCreatePipelineLayout(deviceIF.logical.device, &pressurePipelineCreateInfo, nullptr, &pressurePipeline.pipelineLayout));
+
+		std::vector< VkPipelineShaderStageCreateInfo > pressureShaderStages{
+			{
+				.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+				.stage = VK_SHADER_STAGE_VERTEX_BIT,
+				.module = shaderModule,
+				.pName = "main"
+			},
+			{
+				.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+				.stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+				.module = shaderModule,
+				.pName = "pressureShader"
+			}
+		};
+		createPipeline(pressurePipeline.pipeline, pressureShaderStages, pressureLayout, pressurePipeline.pipelineLayout, VK_FORMAT_R16_SFLOAT, VK_COLOR_COMPONENT_R_BIT);
+
+		std::vector<VkDescriptorSetLayout> gradientLayout;
+		gradientLayout.push_back(descriptorLayouts[0]);
+		gradientLayout.push_back(descriptorLayouts[0]);
+
+		VkPipelineLayoutCreateInfo gradientPipelineCreateInfo{
+			.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+			.setLayoutCount = static_cast<uint32_t>(gradientLayout.size()),
+			.pSetLayouts = gradientLayout.data()
+		};
+
+		validateResult(vkCreatePipelineLayout(deviceIF.logical.device, &gradientPipelineCreateInfo, nullptr, &gradientPipeline.pipelineLayout));
+
+		std::vector< VkPipelineShaderStageCreateInfo > gradientShaderStages{
+			{
+				.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+				.stage = VK_SHADER_STAGE_VERTEX_BIT,
+				.module = shaderModule,
+				.pName = "main"
+			},
+			{
+				.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+				.stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+				.module = shaderModule,
+				.pName = "gradientShader"
+			}
+		};
+		createPipeline(gradientPipeline.pipeline, gradientShaderStages, gradientLayout, gradientPipeline.pipelineLayout, VK_FORMAT_R16G16_SFLOAT, VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT);
+
+		std::vector<VkDescriptorSetLayout> advectionLayout;
+		advectionLayout.push_back(descriptorLayouts[0]);
+		advectionLayout.push_back(descriptorLayouts[0]);
+
+		VkPipelineLayoutCreateInfo advectionPipelineCreateInfo{
+			.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+			.setLayoutCount = static_cast<uint32_t>(advectionLayout.size()),
+			.pSetLayouts = advectionLayout.data()
+		};
+
+		validateResult(vkCreatePipelineLayout(deviceIF.logical.device, &advectionPipelineCreateInfo, nullptr, &velocityAdvectionPipeline.pipelineLayout));
+		validateResult(vkCreatePipelineLayout(deviceIF.logical.device, &advectionPipelineCreateInfo, nullptr, &dyeAdvectionPipeline.pipelineLayout));
+
+		std::vector< VkPipelineShaderStageCreateInfo > advectionShaderStages{
+			{
+				.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+				.stage = VK_SHADER_STAGE_VERTEX_BIT,
+				.module = shaderModule,
+				.pName = "main"
+			},
+			{
+				.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+				.stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+				.module = shaderModule,
+				.pName = "advectionShader"
+			}
+		};
+		createPipeline(velocityAdvectionPipeline.pipeline, advectionShaderStages, advectionLayout, velocityAdvectionPipeline.pipelineLayout, VK_FORMAT_R16G16_SFLOAT, VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT);
+		createPipeline(dyeAdvectionPipeline.pipeline, advectionShaderStages, advectionLayout, dyeAdvectionPipeline.pipelineLayout, VK_FORMAT_R16G16B16A16_SFLOAT, VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT);
+	
+		std::vector<VkDescriptorSetLayout> displayLayout;
+		displayLayout.push_back(descriptorLayouts[0]);
+
+		VkPipelineLayoutCreateInfo displayPipelineCreateInfo{
+			.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+			.setLayoutCount = static_cast<uint32_t>(displayLayout.size()),
+			.pSetLayouts = displayLayout.data()
+		};
+
+		validateResult(vkCreatePipelineLayout(deviceIF.logical.device, &displayPipelineCreateInfo, nullptr, &displayPipeline.pipelineLayout));
+
+		std::vector< VkPipelineShaderStageCreateInfo > displayShaderStages{
+			{
+				.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+				.stage = VK_SHADER_STAGE_VERTEX_BIT,
+				.module = shaderModule,
+				.pName = "main"
+			},
+			{
+				.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+				.stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+				.module = shaderModule,
+				.pName = "displayShader"
+			}
+		};
+		createPipeline(displayPipeline.pipeline, displayShaderStages, displayLayout, displayPipeline.pipelineLayout, VK_FORMAT_B8G8R8A8_SRGB, VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT);
+	}
+
 	void recreateSwapchain() {
 		deviceIF.logical.swapchainConfiguration.updateSwapchain = false;
 		vkDeviceWaitIdle(deviceIF.logical.device);
@@ -471,19 +659,19 @@ public:
 
 	void transitionImageUndefinedToAttachment(VkCommandBuffer& commandBuffer) {
 		VkImageMemoryBarrier2 outputBarrier{
-						.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-						.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-						.srcAccessMask = 0,
-						.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-						.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-						.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-						.newLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-						.image = deviceIF.logical.swapchainConfiguration.swapchainImages[imageIndex],
-						.subresourceRange {
-							.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-							.levelCount = 1,
-							.layerCount = 1
-						}
+			.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+			.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+			.srcAccessMask = 0,
+			.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+			.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+			.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+			.newLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+			.image = deviceIF.logical.swapchainConfiguration.swapchainImages[imageIndex],
+			.subresourceRange {
+				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				.levelCount = 1,
+				.layerCount = 1
+			}
 		};
 
 		VkDependencyInfo barrierDependencyInfo{
@@ -497,15 +685,15 @@ public:
 
 	void transitionImageAttachmentToPresent(VkCommandBuffer& commandBuffer) {
 		VkImageMemoryBarrier2 barrierPresent{
-					.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-					.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-					.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-					.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-					.dstAccessMask = 0,
-					.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-					.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-					.image = deviceIF.logical.swapchainConfiguration.swapchainImages[imageIndex],
-					.subresourceRange{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1 }
+			.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+			.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+			.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+			.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+			.dstAccessMask = 0,
+			.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+			.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+			.image = deviceIF.logical.swapchainConfiguration.swapchainImages[imageIndex],
+			.subresourceRange{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1 }
 		};
 		VkDependencyInfo barrierPresentDependencyInfo{
 			.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
@@ -523,14 +711,14 @@ public:
 	RenderingAttachment setRenderingAttachment(VkImageView& imageView) {
 		RenderingAttachment attachment{};
 		attachment.attachmentInfo = {
-				.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-				.imageView = imageView,
-				.imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-				.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-				.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-				.clearValue{
-					windowIF.clearColor
-				}
+			.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+			.imageView = imageView,
+			.imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+			.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+			.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+			.clearValue{
+				windowIF.clearColor
+			}
 		};
 
 		attachment.renderingInfo = {
@@ -549,11 +737,271 @@ public:
 		return attachment;
 	}
 
+	void transitionFromReadToAttach(VkCommandBuffer& commandBuffer, VkImage& image) {
+		VkImageMemoryBarrier2 transitionAttachementfromReadtoGetWritten{
+			.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+
+			.srcStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+			.srcAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+
+			.dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+			.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+
+			.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+			.newLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+
+			.image = image,
+
+			.subresourceRange{
+				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				.levelCount = 1,
+				.layerCount = 1
+			}
+		};
+
+		VkDependencyInfo transitionAttachementfromReadtoGetWrittenDependencyInfo{
+			.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+			.imageMemoryBarrierCount = 1,
+			.pImageMemoryBarriers = &transitionAttachementfromReadtoGetWritten
+		};
+
+		vkCmdPipelineBarrier2(commandBuffer, &transitionAttachementfromReadtoGetWrittenDependencyInfo);
+	}
+
+	void transitionFromReadToPresent(VkCommandBuffer& commandBuffer, VkImage& image) {
+		VkImageMemoryBarrier2 transitionAttachementfromReadtoGetWritten{
+			.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+
+			.srcStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+			.srcAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+
+			.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+			.dstAccessMask = VK_ACCESS_2_NONE,	
+
+			.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+			.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+
+			.image = image,
+
+			.subresourceRange{
+				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				.levelCount = 1,
+				.layerCount = 1
+			}
+		};
+
+		VkDependencyInfo transitionAttachementfromReadtoGetWrittenDependencyInfo{
+			.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+			.imageMemoryBarrierCount = 1,
+			.pImageMemoryBarriers = &transitionAttachementfromReadtoGetWritten
+		};
+
+		vkCmdPipelineBarrier2(commandBuffer, &transitionAttachementfromReadtoGetWrittenDependencyInfo);
+	}
+
+	void transitionFromAttachToRead(VkCommandBuffer& commandBuffer, VkImage& image) {
+		VkImageMemoryBarrier2 velocityBarrier{
+			.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+
+			.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+			.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+
+			.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+			.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+
+			.oldLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+			.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+
+			.image = image,
+			.subresourceRange = {
+				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				.levelCount = 1,
+				.layerCount = 1
+			}
+		};
+
+		VkDependencyInfo info{
+			.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+			.imageMemoryBarrierCount = 1,
+			.pImageMemoryBarriers = &velocityBarrier
+		};
+
+		vkCmdPipelineBarrier2(commandBuffer, &info);
+	}
+
+	void transitionFromReadToCopyRead(VkCommandBuffer& commandBuffer, VkImage& image) {
+		VkImageMemoryBarrier2 transitionAttachmentFromWriteToRead{
+			.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+			.srcStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+			.srcAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+			.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+			.dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT,
+			.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+			.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+			.image = image,
+			.subresourceRange{
+				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				.levelCount = 1,
+				.layerCount = 1
+			}
+		};
+		VkDependencyInfo transitionAttachmentFromWriteToReadDependencyInfo{
+			.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+			.imageMemoryBarrierCount = 1,
+			.pImageMemoryBarriers = &transitionAttachmentFromWriteToRead
+		};
+		vkCmdPipelineBarrier2(commandBuffer, &transitionAttachmentFromWriteToReadDependencyInfo);
+	}
+
+	void transitionFromCopyReadToRead(VkCommandBuffer& commandBuffer, VkImage& image) {
+		VkImageMemoryBarrier2 transitionAttachmentFromGettingReadToSampling{
+			.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+
+			.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+			.srcAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT,
+
+			.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+			.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+
+			.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+			.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+
+			.image = image,
+
+			.subresourceRange{
+				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				.levelCount = 1,
+				.layerCount = 1
+			}
+		};
+
+		VkDependencyInfo transitionAttachmentFromGettingReadToSamplingDependencyInfo{
+			.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+			.imageMemoryBarrierCount = 1,
+			.pImageMemoryBarriers = &transitionAttachmentFromGettingReadToSampling
+		};
+
+		vkCmdPipelineBarrier2(commandBuffer, &transitionAttachmentFromGettingReadToSamplingDependencyInfo);
+	}
+
+	void transitionSwapchainImageUndefinedToGetWrite(VkCommandBuffer& commandBuffer) {
+		VkImageMemoryBarrier2 transitionSwapchainImageToGetTextureData{
+			.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+			.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+			.srcAccessMask = VK_ACCESS_2_NONE,
+			.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+			.dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+			.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+			.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+			.image = deviceIF.logical.swapchainConfiguration.swapchainImages[imageIndex],
+			.subresourceRange {
+				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				.levelCount = 1,
+				.layerCount = 1
+			}
+		};
+
+		VkDependencyInfo transitionSwapchainImageToGetTextureDataDependencyInfo{
+			.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+			.imageMemoryBarrierCount = 1,
+			.pImageMemoryBarriers = &transitionSwapchainImageToGetTextureData
+		};
+
+		vkCmdPipelineBarrier2(commandBuffer, &transitionSwapchainImageToGetTextureDataDependencyInfo);
+	}
+
+	void transitionSwapchainImageGetWriteToPresent(VkCommandBuffer& commandBuffer) {
+		VkImageMemoryBarrier2 barrierPresent{
+			.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+			.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+			.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+			.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+			.dstAccessMask = VK_ACCESS_2_NONE,
+			.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+			.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+			.image = deviceIF.logical.swapchainConfiguration.swapchainImages[imageIndex],
+			.subresourceRange{
+				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				.levelCount = 1,
+				.layerCount = 1
+			}
+		};
+
+		VkDependencyInfo barrierPresentDependencyInfo12{
+			.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+			.imageMemoryBarrierCount = 1,
+			.pImageMemoryBarriers = &barrierPresent
+		};
+		vkCmdPipelineBarrier2(commandBuffer, &barrierPresentDependencyInfo12);
+	}
+
+	void copyImageFromTo(VkCommandBuffer& commandBuffer, VkImage& image1, VkImage& image2) {
+		VkImageCopy copyRegion{
+			.srcSubresource{
+				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				.layerCount = 1
+			},
+			.dstSubresource{
+				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				.layerCount = 1
+			},
+			.extent{
+				.width = static_cast<uint32_t>(windowIF.dimensions.x),
+				.height = static_cast<uint32_t>(windowIF.dimensions.y),
+				.depth = 1
+			}
+		};
+
+		VkImageBlit blit{
+			.srcSubresource = {
+				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				.mipLevel = 0,
+				.baseArrayLayer = 0,
+				.layerCount = 1
+			},
+			.srcOffsets = {
+				{ 0, 0, 0 },
+				{ static_cast<int>(windowIF.dimensions.x), static_cast<int>(windowIF.dimensions.y), 1 }
+			},
+			.dstSubresource = {
+				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				.mipLevel = 0,
+				.baseArrayLayer = 0,
+				.layerCount = 1
+			},
+			.dstOffsets = {
+				{ 0, 0, 0 },
+				 { static_cast<int>(windowIF.dimensions.x), static_cast<int>(windowIF.dimensions.y), 1 }
+			}
+		};
+
+		vkCmdBlitImage(
+			commandBuffer,
+			image1,
+			VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+			image2,
+			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+			1,
+			&blit,
+			VK_FILTER_LINEAR
+		);
+	}
+
+	uint32_t splatRead = 0;
+	uint32_t splatWrite = 1;
+
+	uint32_t pressureRead = 0;
+	uint32_t pressureWrite = 1;
+
+	uint32_t dyeSplatRead = 0;
+	uint32_t dyeSplatWrite = 1;
+
+	bool once = false;
+
 	void animate() {
 
 		bool quit{ false };
 		while (!quit) {
-
 			SDL_Event event;
 			while (SDL_PollEvent(&event)) {
 				if (event.type == SDL_EVENT_QUIT) {
@@ -596,11 +1044,104 @@ public:
 			};
 			vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-			RenderingAttachment renderingAttachmeht = setRenderingAttachment(deviceIF.logical.swapchainConfiguration.swapchainImageViews[imageIndex]);
+			RenderingAttachment renderingAttachmeht;
+			if (!once) {
+				for (uint32_t index = 0; index < 1; index++) {
+					renderingAttachmeht = setRenderingAttachment(velocityField.field[splatWrite].imageView);
+					transitionFromReadToAttach(commandBuffer, velocityField.field[splatWrite].image);
+					vkCmdBeginRendering(commandBuffer, &renderingAttachmeht.renderingInfo);
+					vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, velocitySplatPipeline.pipeline );
+					vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, velocitySplatPipeline.pipelineLayout, 0, 1, &velocityField.descriptors[splatRead], 0, nullptr);
+					vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+					vkCmdEndRendering(commandBuffer);
+					transitionFromAttachToRead(commandBuffer, velocityField.field[splatWrite].image);
 
+					std::swap( splatRead, splatWrite );
+				}
+			}
+
+			if (!once) {
+				for (uint32_t index = 0; index < 1; index++) {
+					renderingAttachmeht = setRenderingAttachment(dyeField.field[dyeSplatWrite].imageView);
+					transitionFromReadToAttach(commandBuffer, dyeField.field[dyeSplatWrite].image);
+					vkCmdBeginRendering(commandBuffer, &renderingAttachmeht.renderingInfo);
+					vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, dyeSplatPipeline.pipeline);
+					vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, dyeSplatPipeline.pipelineLayout, 0, 1, &dyeField.descriptors[dyeSplatRead], 0, nullptr);
+					vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+					vkCmdEndRendering(commandBuffer);
+					transitionFromAttachToRead(commandBuffer, dyeField.field[dyeSplatWrite].image);
+
+					std::swap(dyeSplatRead, dyeSplatWrite);
+				}
+				once = true;
+			}
+
+			renderingAttachmeht = setRenderingAttachment(diverganceField.field.imageView);
+			transitionFromReadToAttach(commandBuffer, diverganceField.field.image);
+			vkCmdBeginRendering(commandBuffer, &renderingAttachmeht.renderingInfo);
+			vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, divergancePipeline.pipeline);
+			vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, divergancePipeline.pipelineLayout, 0, 1, &velocityField.descriptors[splatRead], 0, nullptr);
+			vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+			vkCmdEndRendering(commandBuffer);
+			transitionFromAttachToRead(commandBuffer, diverganceField.field.image);
+
+		
+
+			for (uint32_t i = 0; i < 20; i++) {
+				renderingAttachmeht = setRenderingAttachment(pressureField.field[pressureWrite].imageView);
+				transitionFromReadToAttach(commandBuffer, pressureField.field[pressureWrite].image);
+				vkCmdBeginRendering(commandBuffer, &renderingAttachmeht.renderingInfo);
+				vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pressurePipeline.pipeline);
+				vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pressurePipeline.pipelineLayout, 0, 1, &pressureField.descriptors[pressureRead], 0, nullptr);
+				vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pressurePipeline.pipelineLayout, 1, 1, &diverganceField.descriptors, 0, nullptr);
+				vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+				vkCmdEndRendering(commandBuffer);
+				transitionFromAttachToRead(commandBuffer, pressureField.field[pressureWrite].image);
+
+				std::swap(pressureRead, pressureWrite);
+			}
+
+			renderingAttachmeht = setRenderingAttachment(velocityField.field[splatWrite].imageView);
+			transitionFromReadToAttach(commandBuffer, velocityField.field[splatWrite].image);
+			vkCmdBeginRendering(commandBuffer, &renderingAttachmeht.renderingInfo);
+			vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, gradientPipeline.pipeline);
+			vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, gradientPipeline.pipelineLayout, 0, 1, &pressureField.descriptors[pressureRead], 0, nullptr);
+			vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, gradientPipeline.pipelineLayout, 1, 1, &velocityField.descriptors[splatRead], 0, nullptr);
+			vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+			vkCmdEndRendering(commandBuffer);
+			transitionFromAttachToRead(commandBuffer, velocityField.field[splatWrite].image);
+
+			std::swap(splatRead, splatWrite);
+
+			renderingAttachmeht = setRenderingAttachment(velocityField.field[splatWrite].imageView);
+			transitionFromReadToAttach(commandBuffer, velocityField.field[splatWrite].image);
+			vkCmdBeginRendering(commandBuffer, &renderingAttachmeht.renderingInfo);
+			vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, velocityAdvectionPipeline.pipeline);
+			vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, velocityAdvectionPipeline.pipelineLayout, 0, 1, &velocityField.descriptors[splatRead], 0, nullptr);
+			vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, velocityAdvectionPipeline.pipelineLayout, 1, 1, &velocityField.descriptors[splatRead], 0, nullptr);
+			vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+			vkCmdEndRendering(commandBuffer);
+			transitionFromAttachToRead(commandBuffer, velocityField.field[splatWrite].image);
+
+			std::swap(splatRead, splatWrite);
+
+			renderingAttachmeht = setRenderingAttachment(dyeField.field[dyeSplatWrite].imageView);
+			transitionFromReadToAttach(commandBuffer, dyeField.field[dyeSplatWrite].image);
+			vkCmdBeginRendering(commandBuffer, &renderingAttachmeht.renderingInfo);
+			vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, dyeAdvectionPipeline.pipeline);
+			vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, dyeAdvectionPipeline.pipelineLayout, 0, 1, &velocityField.descriptors[splatWrite], 0, nullptr);
+			vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, dyeAdvectionPipeline.pipelineLayout, 1, 1, &dyeField.descriptors[dyeSplatRead], 0, nullptr);
+			vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+			vkCmdEndRendering(commandBuffer);
+			transitionFromAttachToRead(commandBuffer, dyeField.field[dyeSplatWrite].image);
+
+			std::swap(dyeSplatRead, dyeSplatWrite);
+
+			renderingAttachmeht = setRenderingAttachment(deviceIF.logical.swapchainConfiguration.swapchainImageViews[imageIndex]);
 			transitionImageUndefinedToAttachment(commandBuffer);
 			vkCmdBeginRendering(commandBuffer, &renderingAttachmeht.renderingInfo);
-			vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+			vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, displayPipeline.pipeline);
+			vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, displayPipeline.pipelineLayout, 0, 1, &dyeField.descriptors[dyeSplatRead], 0, nullptr);
 			vkCmdDraw(commandBuffer, 3, 1, 0, 0);
 			vkCmdEndRendering(commandBuffer);
 			transitionImageAttachmentToPresent(commandBuffer);
@@ -635,7 +1176,343 @@ public:
 			if (deviceIF.logical.swapchainConfiguration.updateSwapchain) {
 				recreateSwapchain();
 			}
+
+			//SDL_Delay(100);
 		}
+	}
+
+	void helperForTransition(FieldState &fieldState ) {
+			VkFenceCreateInfo fenceOneTimeCreateInfo{
+				.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO
+			};
+			VkFence fenceOneTime;
+			validateResult(vkCreateFence(deviceIF.logical.device, &fenceOneTimeCreateInfo, nullptr, &fenceOneTime));
+
+			VkCommandBuffer commandBufferOneTime;
+			VkCommandBufferAllocateInfo commandBufferOneTimeAllocationInfo{
+				.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+				.commandPool = deviceIF.logical.commandPool,
+				.commandBufferCount = 1
+			};
+
+			validateResult(vkAllocateCommandBuffers(deviceIF.logical.device, &commandBufferOneTimeAllocationInfo, &commandBufferOneTime));
+
+			VkCommandBufferBeginInfo commandBufferOneTimeBeginInfo{
+				.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+				.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
+			};
+			validateResult(vkBeginCommandBuffer(commandBufferOneTime, &commandBufferOneTimeBeginInfo));
+
+			transitionImageFromUndefinedToRead(commandBufferOneTime, fieldState.image);
+
+			validateResult(vkEndCommandBuffer(commandBufferOneTime));
+
+			VkSubmitInfo oneTimeSubmitInfo{
+				.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+				.commandBufferCount = 1,
+				.pCommandBuffers = &commandBufferOneTime
+			};
+
+			validateResult(vkQueueSubmit(deviceIF.queue.queue, 1, &oneTimeSubmitInfo, fenceOneTime));
+			validateResult(vkWaitForFences(deviceIF.logical.device, 1, &fenceOneTime, VK_TRUE, UINT64_MAX));
+		
+	}
+
+	void transitionImageFromUndefinedToRead(VkCommandBuffer& commandBuffer, VkImage& image) {
+		VkImageMemoryBarrier2 barrierLayoutTransition{
+				.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+				.srcStageMask = VK_PIPELINE_STAGE_2_NONE,
+				.srcAccessMask = VK_ACCESS_2_NONE,
+				.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+				.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+				.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+				.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+				.image = image,
+				.subresourceRange = {
+					.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+					.levelCount = 1,
+					.layerCount = 1
+				}
+		};
+
+		VkDependencyInfo barrierDependencyInfo{
+			.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+			.imageMemoryBarrierCount = 1,
+			.pImageMemoryBarriers = &barrierLayoutTransition
+		};
+
+		vkCmdPipelineBarrier2(commandBuffer, &barrierDependencyInfo);
+	}
+
+	void clearImage(FieldState& fieldState, VkClearColorValue clearValue) {
+		VkFenceCreateInfo fenceOneTimeCreateInfo{
+			.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO
+		};
+		VkFence fenceOneTime;
+		validateResult(vkCreateFence(deviceIF.logical.device, &fenceOneTimeCreateInfo, nullptr, &fenceOneTime));
+
+		VkCommandBuffer commandBufferOneTime;
+		VkCommandBufferAllocateInfo commandBufferOneTimeAllocationInfo{
+			.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+			.commandPool = deviceIF.logical.commandPool,
+			.commandBufferCount = 1
+		};
+
+		validateResult(vkAllocateCommandBuffers(deviceIF.logical.device, &commandBufferOneTimeAllocationInfo, &commandBufferOneTime));
+
+		VkCommandBufferBeginInfo commandBufferOneTimeBeginInfo{
+			.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+			.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
+		};
+		validateResult(vkBeginCommandBuffer(commandBufferOneTime, &commandBufferOneTimeBeginInfo));
+
+		VkImageMemoryBarrier2 barrierLayoutTransition{
+			.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+			.srcStageMask = VK_PIPELINE_STAGE_2_NONE,
+			.srcAccessMask = VK_ACCESS_2_NONE,
+			.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+			.dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+			.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+			.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+			.image = fieldState.image,
+			.subresourceRange = {
+				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				.levelCount = 1,
+				.layerCount = 1
+			}
+		};
+
+		VkDependencyInfo barrierDependencyInfo{
+			.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+			.imageMemoryBarrierCount = 1,
+			.pImageMemoryBarriers = &barrierLayoutTransition
+		};
+
+		vkCmdPipelineBarrier2(commandBufferOneTime, &barrierDependencyInfo);
+
+		VkImageSubresourceRange range{
+			.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+			.levelCount = 1,
+			.layerCount = 1
+		};
+		vkCmdClearColorImage(commandBufferOneTime, fieldState.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearValue, 1, &range);
+
+		VkImageMemoryBarrier2 barrierLayoutTransition1{
+			.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+			.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+			.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+			.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+			.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+			.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+			.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+			.image = fieldState.image,
+			.subresourceRange = {
+				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				.levelCount = 1,
+				.layerCount = 1
+			}
+		};
+
+		VkDependencyInfo barrierDependencyInfo1{
+			.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+			.imageMemoryBarrierCount = 1,
+			.pImageMemoryBarriers = &barrierLayoutTransition1
+		};
+
+		vkCmdPipelineBarrier2(commandBufferOneTime, &barrierDependencyInfo1);
+
+		transitionImageFromUndefinedToRead(commandBufferOneTime, fieldState.image);
+
+		validateResult(vkEndCommandBuffer(commandBufferOneTime));
+
+		VkSubmitInfo oneTimeSubmitInfo{
+			.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+			.commandBufferCount = 1,
+			.pCommandBuffers = &commandBufferOneTime
+		};
+
+		validateResult(vkQueueSubmit(deviceIF.queue.queue, 1, &oneTimeSubmitInfo, fenceOneTime));
+		validateResult(vkWaitForFences(deviceIF.logical.device, 1, &fenceOneTime, VK_TRUE, UINT64_MAX));
+	}
+
+	FieldState generateField( VkFormat imageFormat, VkFilter filtering) {
+
+		FieldState fieldState{};
+
+		VkImageCreateInfo textureImageCreateInfo{
+			.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+			.imageType = VK_IMAGE_TYPE_2D,
+			.format = imageFormat,
+			.extent{
+				.width = windowIF.surfaceCapabilities.currentExtent.width,
+				.height = windowIF.surfaceCapabilities.currentExtent.height,
+				.depth = 1
+			},
+			.mipLevels = 1,
+			.arrayLayers = 1,
+			.samples = VK_SAMPLE_COUNT_1_BIT,
+			.tiling = VK_IMAGE_TILING_OPTIMAL,
+			.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+			.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
+		};
+
+		VmaAllocationCreateInfo textureImageAllocationCreateInfo{
+			.usage = VMA_MEMORY_USAGE_AUTO
+		};
+		validateResult(vmaCreateImage(vmaAllocator, &textureImageCreateInfo, &textureImageAllocationCreateInfo, &fieldState.image, &fieldState.allocation, nullptr));
+
+		VkImageViewCreateInfo textureImageViewCreateInfo{
+			.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+			.image = fieldState.image,
+			.viewType = VK_IMAGE_VIEW_TYPE_2D,
+			.format = imageFormat,
+			.subresourceRange = {
+				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				.levelCount = 1,
+				.layerCount = 1
+			}
+		};
+
+		validateResult(vkCreateImageView(deviceIF.logical.device, &textureImageViewCreateInfo, nullptr, &fieldState.imageView));
+
+		//helperForTransition( fieldState );
+		if (imageFormat == VK_FORMAT_R16G16_SFLOAT) {
+			clearImage( fieldState, VkClearColorValue{ 0.0, 0.0 });
+		}
+		if (imageFormat == VK_FORMAT_R16G16B16A16_SFLOAT) {
+			clearImage(fieldState, VkClearColorValue{ 0.0, 0.0,0.0, 0.0 });
+		}
+		if (imageFormat == VK_FORMAT_R16_SFLOAT) {
+			clearImage(fieldState, VkClearColorValue{ 0.0 });
+		}
+
+		VkSamplerCreateInfo samplerCreateInfo{
+			.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+			.magFilter = filtering,
+			.minFilter = filtering,
+			.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST,
+			.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+			.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE
+		};
+
+		validateResult(vkCreateSampler(deviceIF.logical.device, &samplerCreateInfo, nullptr, &fieldState.sampler));
+
+		fieldState.descriptor = {
+			.sampler = fieldState.sampler,
+			.imageView = fieldState.imageView,
+			.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+		};
+
+		return fieldState;
+	}
+
+	void setupDescriptorLayouts() {
+		VkDescriptorSetLayoutBinding binding{
+			.binding = 0,
+			.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT
+		};
+
+		VkDescriptorSetLayoutCreateInfo descriptorLayoutCreateInfo{
+			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+			.bindingCount = 1,
+			.pBindings = &binding
+		};
+
+		validateResult(vkCreateDescriptorSetLayout(deviceIF.logical.device, &descriptorLayoutCreateInfo, nullptr, &descriptorLayouts[0]));
+	}
+
+	void setupData() {
+
+		setupDescriptorLayouts();
+
+		uint32_t descriptorCount = 7;
+		VkDescriptorPoolSize poolSize{
+			.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+			.descriptorCount = static_cast<uint32_t>(descriptorCount)
+		};
+
+		VkDescriptorPoolCreateInfo descriptorPoolCreateInfo{
+			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+			.maxSets = static_cast<uint32_t>(descriptorCount),
+			.poolSizeCount = 1,
+			.pPoolSizes = &poolSize
+		};
+
+		validateResult(vkCreateDescriptorPool(deviceIF.logical.device, &descriptorPoolCreateInfo, nullptr, &descriptorPool));
+
+		velocityField.field[0] = generateField(VK_FORMAT_R16G16_SFLOAT, VK_FILTER_LINEAR );
+		velocityField.field[1] = generateField(VK_FORMAT_R16G16_SFLOAT, VK_FILTER_LINEAR);
+		updateDescriptors(velocityField);
+
+		dyeField.field[0] = generateField(VK_FORMAT_R16G16B16A16_SFLOAT, VK_FILTER_LINEAR);
+		dyeField.field[1] = generateField(VK_FORMAT_R16G16B16A16_SFLOAT, VK_FILTER_LINEAR);
+		updateDescriptors(dyeField);
+
+		diverganceField.field = generateField( VK_FORMAT_R16_SFLOAT, VK_FILTER_LINEAR);
+		updateDescriptors(diverganceField);
+
+		pressureField.field[0] = generateField(VK_FORMAT_R16_SFLOAT, VK_FILTER_LINEAR);
+		pressureField.field[1] = generateField(VK_FORMAT_R16_SFLOAT, VK_FILTER_LINEAR);
+		updateDescriptors(pressureField);
+	}
+
+	void updateDescriptors(PingPongField& field ) {
+		std::vector< VkDescriptorSetLayout > layouts(2, descriptorLayouts[0]);
+		VkDescriptorSetAllocateInfo descriptorAllocateInfo{
+			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+			.descriptorPool = descriptorPool,
+			.descriptorSetCount = 2,
+			.pSetLayouts = layouts.data()
+		};
+
+		validateResult(vkAllocateDescriptorSets(deviceIF.logical.device, &descriptorAllocateInfo, field.descriptors.data()));
+
+		std::vector< VkWriteDescriptorSet > writeDescriptorSet;
+		VkWriteDescriptorSet writeDesriptorSet0{
+			.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+			.dstSet = field.descriptors[0],
+			.dstBinding = 0,
+			.descriptorCount = 1,
+			.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+			.pImageInfo = &field.field[0].descriptor
+		};
+		writeDescriptorSet.push_back(writeDesriptorSet0);
+		
+		VkWriteDescriptorSet writeDesriptorSet1{
+			.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+			.dstSet = field.descriptors[1],
+			.dstBinding = 0,
+			.descriptorCount = 1,
+			.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+			.pImageInfo = &field.field[1].descriptor
+		};
+		writeDescriptorSet.push_back(writeDesriptorSet1);
+		
+		vkUpdateDescriptorSets(deviceIF.logical.device, 2, writeDescriptorSet.data(), 0, nullptr);
+	}
+
+	void updateDescriptors(NormalField& field) {
+		VkDescriptorSetAllocateInfo descriptorAllocateInfo{
+			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+			.descriptorPool = descriptorPool,
+			.descriptorSetCount = 1,
+			.pSetLayouts = &descriptorLayouts[0]
+		};
+
+		validateResult(vkAllocateDescriptorSets(deviceIF.logical.device, &descriptorAllocateInfo, &field.descriptors));
+
+		VkWriteDescriptorSet writeDesriptorSet{
+			.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+			.dstSet = field.descriptors,
+			.dstBinding = 0,
+			.descriptorCount = 1,
+			.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+			.pImageInfo = &field.field.descriptor
+		};
+
+		vkUpdateDescriptorSets(deviceIF.logical.device, 1, &writeDesriptorSet, 0, nullptr);
 	}
 
 	void setup() {
@@ -649,6 +1526,7 @@ public:
 		setupSync2();
 		setupCommandBuffers();
 		loadAndCompileShaders();
+		setupData();
 		setupPipeline();
 		animate();
 	}
@@ -730,11 +1608,37 @@ private:
 	Slang::ComPtr< slang::IGlobalSession > slangGlobalSession;
 	VkShaderModule shaderModule{};
 
-	VkPipelineLayout pipelineLayout;
-	VkPipeline pipeline;
-
 	int frameIndex = 0;
 	uint32_t imageIndex = 0;
+
+	struct FieldState {
+		VkImage image;
+		VkImageView imageView;
+		VmaAllocation allocation;
+		VkSampler sampler;
+
+		VkDescriptorImageInfo descriptor;
+	};
+
+	struct PingPongField {
+		VkDescriptorSetLayout descriptorLayout;
+		std::array< VkDescriptorSet, 2 > descriptors;
+		std::array<FieldState, 2> field;
+	} velocityField, dyeField, pressureField;
+
+	struct NormalField {
+		VkDescriptorSetLayout descriptorLayout;
+		VkDescriptorSet descriptors;
+		FieldState field;
+	} diverganceField;
+
+	struct Pipeline {
+		VkPipelineLayout pipelineLayout;
+		VkPipeline pipeline;
+	} velocitySplatPipeline, dyeSplatPipeline, divergancePipeline, pressurePipeline, gradientPipeline, velocityAdvectionPipeline, dyeAdvectionPipeline, displayPipeline;
+
+	VkDescriptorPool descriptorPool;
+	std::array< VkDescriptorSetLayout, 2> descriptorLayouts;
 };
 
 class Ryutai {
