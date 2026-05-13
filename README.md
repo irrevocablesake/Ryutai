@@ -37,8 +37,8 @@ A general flow of the program can be thought as follows:
       - Velocity field reads the color component as force
       - Dye Field, reads the color and stores it
 - But this "disturbing" of fluid due to splats, causes the velocity field to have some "bad areas", areas, that compress or expand, that wouldn't respect physics.
-- The first thing after splats have been introduced is to find these "bad areas"
-- Once we have those bad areas, we need to compute a pressure that would counteract these "bad areas", which makes the simulation "incompressible"
+- We try to find these "bad areas" using something called as "divergence"
+- Once we have those bad areas, we need to compute a pressure field that would counteract these "bad areas", which makes the simulation "incompressible"
 - We fix the velocity using the pressure, and now we have a stable velocity field again
 - The most important thing a fluid does is, and that's the reason for it's mere existance: it flows. We now use our stable velocity to do two things: flow velocity itself and whatever is present in the fluid ( dye )
 - We also ensure to dampen the flow, so eventually as the simulation keeps running, the flow looses energy and comes to standstill ( at that point we just kill the dye )
