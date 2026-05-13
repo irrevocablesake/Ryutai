@@ -33,9 +33,9 @@ The rest of the algorithm works to make sure the velocity field is computed acco
 A general flow of the program can be thought as follows:
 -  We start with a zero velocity field and a zero dye field ( no flow & no color)
 -  We introduce a few "splats" that disturb these fields:
-     - eg. A splat is made up of radius, color and location, we send this information to the velocity field and dye field, they accordingly make a note of this splat
-     - Velocity field reads the color component as force
-     - Dye Field, reads the color and stores it
+ - eg. A splat is made up of radius, color and location, we send this information to the velocity field and dye field, they accordingly make a note of this splat
+ - Velocity field reads the color component as force
+ - Dye Field, reads the color and stores it
 - But this "disturbing" of fluid due to splats, causes the velocity field to have some "bad areas", areas, that compress or expand, that wouldn't respect physics.
 - The first thing after splats have been introduced is to find these "bad areas"
 - Once we have those bad areas, we need to compute a pressure that would counteract these "bad areas", which makes the simulation "incompressible"
