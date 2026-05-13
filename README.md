@@ -7,7 +7,7 @@
       <td>
         <img src="https://raw.githubusercontent.com/irrevocablesake/Ryutai/refs/heads/master/images/repo-banner.png" width="100%">
         <p style="align: center; font-style: italic; font-size: 14px; color: #555;">
-          Navier Stokes - Incompressible Liqud Simulation
+          Navier Stokes - Incompressible Fluid Simulation
         </p>
       </td>
     </tr>
@@ -18,7 +18,7 @@
 ## Intuition
 Ryutai - Japanese word for "fluid"
 
-Fluids are everywhere, water, honey, air, well anything that flows falls in that category. The goal was to implement a **2D Fluid** Simulation using **C++** and **Vulkan**, and later expand it into **3D Fluid** Simulation all based on **Jos Stam Real-Time Fluid Dynamics** Technique, which itself uses Navier Stokes Incompressible Liquid Equations. 
+Fluids are everywhere, water, honey, air, well anything that flows falls in that category. The goal was to implement a **2D Fluid** Simulation using **C++** and **Vulkan**, and later expand it into **3D Fluid** Simulation all based on **Jos Stam Real-Time Fluid Dynamics** Technique, which itself uses Navier Stokes Incompressible Fluid Equations. 
 
 The equations itself look very complicated at a first glance, but - [ Fluid Dynamics NVIDIA ](https://developer.nvidia.com/gpugems/gpugems/part-vi-beyond-triangles/chapter-38-fast-fluid-dynamics-simulation-gpu) does a great job at breaking the equations down to chewable bites. Well, I said chewable not digestable haha, it helped me atleast understand what's happening overall with the simulation
 
