@@ -1,4 +1,4 @@
-# Ryutai - 2D Fluid Simulation ( WIP )
+# Ryutai - 2D Fluid Simulation
 
 <div align="center">
 <table>
