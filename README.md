@@ -22,7 +22,9 @@ Fluids are everywhere, water, honey, air, well anything that flows falls in that
 
 The equations itself look very complicated at a first glance, but - [ Fluid Dynamics NVIDIA ](https://developer.nvidia.com/gpugems/gpugems/part-vi-beyond-triangles/chapter-38-fast-fluid-dynamics-simulation-gpu) does a great job at breaking the equations down to chewable bites. Well, I said chewable not digestable haha, it helped me atleast understand what's happening overall within the simulation
 
-The idea is quite simple: Fluids flow, what do they flow? They flow things that are present in them, and more importantly - they flow themselves too. At the highest level we can think of this simulation made up of two things:
+The idea is quite simple: Fluids flow, what do they flow? They flow things that are present in them, and more importantly - they flow themselves too. 
+
+At the highest level we can think of this simulation made up of two things:
 -  Velocity Field: A field that tells you where the fluid is flowing
 -  Dye Field: A field that tells you if the fluid flows something in it, this is like dropping paint drops in a bucket of water, it gives us the ability to visualize the flow properly.
 
