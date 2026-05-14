@@ -38,11 +38,21 @@ Sampler2D fieldB;
 static float dt = 0.016;
 static float2 texelSize = float2(1.0 / 1920.0, 1.0 / 1200.0);
 
+struct SplatData {
+    float2 point;
+    float padding[2];
+    float3 color;
+    float radius;
+};
+
+[[vk::push_constant]]
+SplatData data;
+
 [shader("fragment")]
 float4 splatShader(VSOutput input) : SV_Target {
-    float3 color = float3(0.2, 0.7, 0.9);
-    float2 point = float2(0.2,0.2);
-    float radius = 0.0025;
+    float3 color = data.color;
+    float2 point = data.point;
+    float radius = data.radius;
     float aspectRatio = 1.6;
 
     float2 p = input.uv - point.xy;
@@ -123,7 +133,7 @@ float4 advectionShader(VSOutput input) : SV_Target {
     float2 coord = input.uv - dt * fieldA.Sample(input.uv).xy;
     float4 result = fieldB.Sample(coord);
 
-    float decay = 1.0 + 0.2 * dt;
+    float decay = 1.0 + 0.01 * dt;
 
     float4 value = (result / decay);
 

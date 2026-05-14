@@ -20,6 +20,8 @@
 #include<vector>
 #include<array>
 
+#include<random>
+
 class Renderer {
 
 public:
@@ -339,13 +341,30 @@ public:
 
 	}
 
-	void createPipeline(VkPipeline& pipeline, std::vector< VkPipelineShaderStageCreateInfo >& shaderStages, std::vector<VkDescriptorSetLayout> &layout, VkPipelineLayout& pipelineLayout, VkFormat format, VkColorComponentFlags flags ) {
+	void createPipeline(VkPipeline& pipeline, std::vector< VkPipelineShaderStageCreateInfo >& shaderStages, std::vector<VkDescriptorSetLayout> &layout, VkPipelineLayout& pipelineLayout, VkFormat format, VkColorComponentFlags flags, uint32_t pushConstantSize = 0 ) {
 
-		VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo{
-			.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-			.setLayoutCount = static_cast<uint32_t>(layout.size()),
-			.pSetLayouts = layout.data()
-		};
+		VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo{};
+		if (pushConstantSize == 0) {
+			pipelineLayoutCreateInfo = {
+				.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+				.setLayoutCount = static_cast<uint32_t>(layout.size()),
+				.pSetLayouts = layout.data()
+			};
+		}
+		else {
+			VkPushConstantRange pushConstantRange{
+				.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+				.size = pushConstantSize
+			};
+
+			pipelineLayoutCreateInfo = {
+				.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+				.setLayoutCount = static_cast<uint32_t>(layout.size()),
+				.pSetLayouts = layout.data(),
+				.pushConstantRangeCount = 1,
+				.pPushConstantRanges = &pushConstantRange
+			};
+		}
 
 		validateResult(vkCreatePipelineLayout(deviceIF.logical.device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayout));
 
@@ -459,7 +478,7 @@ public:
 				.pName = "splatShader"
 			}
 		};
-		createPipeline(velocitySplatPipeline.pipeline, velocitySplatShaderStages, velocitySplatLayout, velocitySplatPipeline.pipelineLayout, VK_FORMAT_R16G16_SFLOAT, VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT);
+		createPipeline(velocitySplatPipeline.pipeline, velocitySplatShaderStages, velocitySplatLayout, velocitySplatPipeline.pipelineLayout, VK_FORMAT_R16G16_SFLOAT, VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT, sizeof( SplatData ));
 	
 		std::vector<VkDescriptorSetLayout> dyeSplatLayout;
 		dyeSplatLayout.push_back(descriptorLayouts[0]);
@@ -486,7 +505,7 @@ public:
 				.pName = "splatShader"
 			}
 		};
-		createPipeline(dyeSplatPipeline.pipeline, dyeSplatShaderStages, dyeSplatLayout, dyeSplatPipeline.pipelineLayout, VK_FORMAT_R16G16B16A16_SFLOAT, VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT);
+		createPipeline(dyeSplatPipeline.pipeline, dyeSplatShaderStages, dyeSplatLayout, dyeSplatPipeline.pipelineLayout, VK_FORMAT_R16G16B16A16_SFLOAT, VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT, sizeof(SplatData));
 
 		std::vector<VkDescriptorSetLayout> diverganceLayout;
 		diverganceLayout.push_back(descriptorLayouts[0]);
@@ -998,7 +1017,35 @@ public:
 
 	bool once = false;
 
+	struct SplatData {
+		glm::vec2 point{};
+		float padding[2];
+		glm::vec3 color{};
+		float radius{};
+	};
+
+	SplatData generateSplat() {
+		SplatData data{};
+		data.point.x = rndGenerator.getRange();
+		data.point.y = rndGenerator.getRange();
+
+		data.color.x = rndGenerator.getRange();   
+		data.color.y = 0.01;                  
+		data.color.z = rndGenerator.getIntensity() * rndGenerator.getRange();              
+
+		data.radius = rndGenerator.getRadius();
+
+		return data;
+	}
+
 	void animate() {
+
+		std::vector< SplatData > splats;
+		splats.resize(25);
+		for (uint32_t index = 0; index < splats.size(); index++) {
+			SplatData data = generateSplat();
+			splats[index] = data;
+		}
 
 		bool quit{ false };
 		while (!quit) {
@@ -1046,11 +1093,13 @@ public:
 
 			RenderingAttachment renderingAttachmeht;
 			if (!once) {
-				for (uint32_t index = 0; index < 1; index++) {
+				for (uint32_t index = 0; index < splats.size(); index++) {
+					SplatData splatData = splats[index];
 					renderingAttachmeht = setRenderingAttachment(velocityField.field[splatWrite].imageView);
 					transitionFromReadToAttach(commandBuffer, velocityField.field[splatWrite].image);
 					vkCmdBeginRendering(commandBuffer, &renderingAttachmeht.renderingInfo);
 					vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, velocitySplatPipeline.pipeline );
+					vkCmdPushConstants( commandBuffer, velocitySplatPipeline.pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(SplatData), &splatData );
 					vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, velocitySplatPipeline.pipelineLayout, 0, 1, &velocityField.descriptors[splatRead], 0, nullptr);
 					vkCmdDraw(commandBuffer, 3, 1, 0, 0);
 					vkCmdEndRendering(commandBuffer);
@@ -1061,11 +1110,13 @@ public:
 			}
 
 			if (!once) {
-				for (uint32_t index = 0; index < 1; index++) {
+				for (uint32_t index = 0; index < splats.size(); index++) {
+					SplatData splatData = splats[index];
 					renderingAttachmeht = setRenderingAttachment(dyeField.field[dyeSplatWrite].imageView);
 					transitionFromReadToAttach(commandBuffer, dyeField.field[dyeSplatWrite].image);
 					vkCmdBeginRendering(commandBuffer, &renderingAttachmeht.renderingInfo);
 					vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, dyeSplatPipeline.pipeline);
+					vkCmdPushConstants(commandBuffer, velocitySplatPipeline.pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(SplatData), &splatData);
 					vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, dyeSplatPipeline.pipelineLayout, 0, 1, &dyeField.descriptors[dyeSplatRead], 0, nullptr);
 					vkCmdDraw(commandBuffer, 3, 1, 0, 0);
 					vkCmdEndRendering(commandBuffer);
@@ -1639,6 +1690,28 @@ private:
 
 	VkDescriptorPool descriptorPool;
 	std::array< VkDescriptorSetLayout, 2> descriptorLayouts;
+
+	struct RNDGenerator {
+
+			std::random_device rd;
+			std::mt19937 gen{ rd() };
+
+			std::uniform_real_distribution<float> range{ 0.0f, 1.0f };
+			std::uniform_real_distribution<float> rangeIntensity{4.0f, 12.0f};
+			std::uniform_real_distribution<float> radius{ 0.001f, 0.004f };
+
+			float getRange(){
+				return range(gen);
+			}
+
+			float getIntensity() {
+				return rangeIntensity(gen);
+			}
+
+			float getRadius() {
+				return radius(gen);
+			}	
+	} rndGenerator;
 };
 
 class Ryutai {
