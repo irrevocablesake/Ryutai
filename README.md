@@ -1,19 +1,13 @@
-# Ryutai - 2D Fluid Simulation ( WIP )
+# Ryutai - 2D Fluid Simulation
 
 <div align="center">
 <table>
   <tbody>
     <tr>
-      <td >
-        <img src="https://raw.githubusercontent.com/irrevocablesake/Ryutai/refs/heads/master/images/Initial.png" width="100%">
-        <p style="text-align: center; font-style: italic; font-size: 14px; color: #555;">
-          Simulation - Initial
-        </p>
-      </td>
       <td>
-        <img src="https://raw.githubusercontent.com/irrevocablesake/Ryutai/refs/heads/master/images/Later.png" width="100%">
-        <p style="text-align: center; font-style: italic; font-size: 14px; color: #555;">
-          Simulation - Elapsed
+        <img src="https://raw.githubusercontent.com/irrevocablesake/Ryutai/refs/heads/master/images/repo-banner.png" width="100%">
+        <p style="align: center; font-style: italic; font-size: 14px; color: #555;">
+          Navier Stokes - Incompressible Fluid Simulation
         </p>
       </td>
     </tr>
@@ -24,17 +18,43 @@
 ## Intuition
 Ryutai - Japanese word for "fluid"
 
-Fluids are everywhere, water, honey, air, well anything that flows falls in that category. The goal was to implement a **2D Fluid** Simulation using **C++** and **Vulkan**, and later expand it into **3D Fluid** Simulation all based on **Jos Stam Real-Time Fluid Dynamics** Technique. 
+Fluids are everywhere, water, honey, air, well anything that flows falls in that category. The goal was to implement a **2D Fluid** Simulation using **C++** and **Vulkan**, and later expand it into **3D Fluid** Simulation all based on **Jos Stam Real-Time Fluid Dynamics** Technique, which itself uses Navier Stokes Incompressible Fluid Equations. 
 
-So far with the progress, we start with a velocity field initialized using Perlin Noise, with this velocity field we transport the density field. In between there are multiple passes to simulate proper flow of fluids with respect to laws of physics, since this is WIP - the physics is wonky but constant tweaks are being made so it becomes a better simulation.
+The equations look very complicated at a first glance, but - [ Fluid Dynamics NVIDIA ](https://developer.nvidia.com/gpugems/gpugems/part-vi-beyond-triangles/chapter-38-fast-fluid-dynamics-simulation-gpu) does a great job at breaking the equations down to chewable bites. Well, I said chewable not digestable haha, it helped me atleast understand what's happening within the simulation overall.
+
+**The idea** is quite simple: **Fluids flow**, what do they flow? 
+- They flow things that are present in them
+- More importantly - they flow themselves too. 
+
+At the highest level, this simulation is made up of two things:
+-  **Velocity Field:** A field that tells you **where** the fluid is flowing.
+-  **Dye Field:** A field that tells you if the fluid flows something in it, this is like dropping paint drops in a bucket of water, it gives us the ability to **visualize** the flow properly.
+
+The rest of the **algorithm** works to make sure the velocity field is **computed** according to the **equations**, hence keeping it true to Physics. 
+
+A general flow of the program can be thought as follows:
+-  We start with a **zero velocity field** and a **zero dye** field ( no flow & no color)
+-  We introduce a few "**splats**" that disturb these fields:
+    - A splat is made up of radius, color and location, we send this information to the velocity field and dye field, they accordingly make a note of this splat
+      - Velocity field reads the color component as **force**
+      - Dye Field, reads the color and **stores it**
+- This "**disturbing**" of fluid due to splats, causes the velocity field to have some "**bad areas**", areas that compress or expand and that wouldn't respect physics.
+- We try to **find** these "**bad areas**" using something called as "**divergence**".
+- Next, we need to compute a **pressure field** that would **counteract** these "bad areas", which makes the simulation "**incompressible**".
+- The velocity field is **fixed** using the pressure field, the result is a stable velocity field.
+- The most important thing a fluid does is, and that's the reason for it's mere existance: it flows. We now use our stable velocity to do two things: **flow velocity itself** and whatever is present in the fluid ( **dye** )
+- We also ensure to **dampen** the flow, so eventually as the simulation keeps running, the flow **looses energy** and comes to standstill ( at that point we just kill the dye ). If we don't do this, the flow will never stop and will keep the energy constant.
+  
+The above algorithm is the soul of the simulation, and that's what gives us the beautiful renders of fluids.
 
 # Simulation
 Here is a video of how the simulation would proceed from an initial state to a few seconds into the simulation
 
-https://github.com/user-attachments/assets/7a25223a-779c-4859-8049-021a4541ed51
+https://github.com/user-attachments/assets/a475feb6-10c5-4e8b-bf70-4d85156f5068
 
 ## Resources
 - [ Fluid Dynamics NVIDIA ](https://developer.nvidia.com/gpugems/gpugems/part-vi-beyond-triangles/chapter-38-fast-fluid-dynamics-simulation-gpu)
 - [ Fluid Simulation for Dummies ]( https://www.mikeash.com/pyblog/fluid-simulation-for-dummies.html )
 - [ Coding Train - Fluid Simulation ]( https://www.youtube.com/watch?v=alhpH6ECFvQ )
+- [ WebGL Fluid Simulation ]( https://github.com/PavelDoGreat/WebGL-Fluid-Simulation/tree/master )
 
